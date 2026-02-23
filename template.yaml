@@ -1,0 +1,273 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  TruthLayer — AI Hallucination Verification API
+  Real-time verification of AI outputs against source documents
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Timeout: 30
+    MemorySize: 512
+    Environment:
+      Variables:
+        BEDROCK_MODEL_ID: amazon.titan-embed-text-v2:0
+        BEDROCK_REGION: us-east-1
+        BEDROCK_EMBEDDING_DIMENSION: "1024"
+        DOCUMENTS_TABLE: !Ref DocumentsTable
+        VERIFICATIONS_TABLE: !Ref VerificationsTable
+        EMBEDDINGS_TABLE: !Ref EmbeddingsTable
+        APIKEYS_TABLE: !Ref ApiKeysTable
+    Architectures:
+      - x86_64
+
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
+      AllowOrigin: "'*'"
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+    Description: API deployment stage name
+
+Resources:
+  # ============================
+  # Lambda Layer (shared code)
+  # ============================
+  TruthLayerSharedLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: truthlayer-shared
+      Description: Shared TruthLayer source code
+      ContentUri: layer/
+      CompatibleRuntimes:
+        - python3.9
+      RetentionPolicy: Delete
+    Metadata:
+      BuildMethod: python3.9
+
+  # ============================
+  # Lambda Functions
+  # ============================
+  VerifyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: truthlayer-verify
+      Handler: lambda/verify/handler.handler
+      CodeUri: .
+      Layers:
+        - !Ref TruthLayerSharedLayer
+      Timeout: 60
+      MemorySize: 1024
+      Policies:
+        - AmazonBedrockFullAccess
+        - DynamoDBCrudPolicy:
+            TableName: !Ref VerificationsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref EmbeddingsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DocumentsTable
+      Events:
+        VerifyPost:
+          Type: Api
+          Properties:
+            Path: /verify
+            Method: POST
+            RestApiId: !Ref TruthLayerApi
+        VerifyOptions:
+          Type: Api
+          Properties:
+            Path: /verify
+            Method: OPTIONS
+            RestApiId: !Ref TruthLayerApi
+
+  DocumentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: truthlayer-documents
+      Handler: lambda/documents/handler.handler
+      CodeUri: .
+      Layers:
+        - !Ref TruthLayerSharedLayer
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DocumentsTable
+      Events:
+        DocumentsPost:
+          Type: Api
+          Properties:
+            Path: /documents
+            Method: POST
+            RestApiId: !Ref TruthLayerApi
+        DocumentsList:
+          Type: Api
+          Properties:
+            Path: /documents
+            Method: GET
+            RestApiId: !Ref TruthLayerApi
+        DocumentsGet:
+          Type: Api
+          Properties:
+            Path: /documents/{id}
+            Method: GET
+            RestApiId: !Ref TruthLayerApi
+        DocumentsDelete:
+          Type: Api
+          Properties:
+            Path: /documents/{id}
+            Method: DELETE
+            RestApiId: !Ref TruthLayerApi
+        DocumentsOptions:
+          Type: Api
+          Properties:
+            Path: /documents
+            Method: OPTIONS
+            RestApiId: !Ref TruthLayerApi
+        DocumentsIdOptions:
+          Type: Api
+          Properties:
+            Path: /documents/{id}
+            Method: OPTIONS
+            RestApiId: !Ref TruthLayerApi
+
+  AnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: truthlayer-analytics
+      Handler: lambda/analytics/handler.handler
+      CodeUri: .
+      Layers:
+        - !Ref TruthLayerSharedLayer
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref VerificationsTable
+      Events:
+        AnalyticsGet:
+          Type: Api
+          Properties:
+            Path: /analytics
+            Method: GET
+            RestApiId: !Ref TruthLayerApi
+        AnalyticsOptions:
+          Type: Api
+          Properties:
+            Path: /analytics
+            Method: OPTIONS
+            RestApiId: !Ref TruthLayerApi
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: truthlayer-health
+      Handler: lambda/health/handler.handler
+      CodeUri: .
+      MemorySize: 128
+      Timeout: 5
+      Events:
+        HealthGet:
+          Type: Api
+          Properties:
+            Path: /health
+            Method: GET
+            RestApiId: !Ref TruthLayerApi
+
+  # ============================
+  # API Gateway
+  # ============================
+  TruthLayerApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: TruthLayerAPI
+      StageName: !Ref StageName
+      Description: TruthLayer Verification API
+      Cors:
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,X-Api-Key,Authorization'"
+        AllowOrigin: "'*'"
+
+  # ============================
+  # DynamoDB Tables
+  # ============================
+  DocumentsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TruthLayerDocuments
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: document_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: document_id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: TruthLayer
+
+  EmbeddingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TruthLayerEmbeddings
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: document_id
+          AttributeType: S
+        - AttributeName: chunk_index
+          AttributeType: N
+      KeySchema:
+        - AttributeName: document_id
+          KeyType: HASH
+        - AttributeName: chunk_index
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: TruthLayer
+
+  VerificationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TruthLayerVerifications
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: verification_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: verification_id
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: TruthLayer
+
+  ApiKeysTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: TruthLayerApiKeys
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: api_key_hash
+          AttributeType: S
+      KeySchema:
+        - AttributeName: api_key_hash
+          KeyType: HASH
+      Tags:
+        - Key: Project
+          Value: TruthLayer
+
+Outputs:
+  ApiUrl:
+    Description: TruthLayer API URL
+    Value: !Sub "https://${TruthLayerApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+
+  VerifyFunctionArn:
+    Description: Verify Lambda Function ARN
+    Value: !GetAtt VerifyFunction.Arn
+
+  DocumentsTableName:
+    Description: Documents DynamoDB Table
+    Value: !Ref DocumentsTable
+
+  VerificationsTableName:
+    Description: Verifications DynamoDB Table
+    Value: !Ref VerificationsTable

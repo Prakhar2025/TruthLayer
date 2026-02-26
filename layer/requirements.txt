@@ -1,4 +1,3 @@
 # Lambda Layer Requirements
 # These packages are installed into the layer for shared use
-numpy>=1.24.0
-scikit-learn>=1.3.0
+numpy>=1.24.0,<2.0.0

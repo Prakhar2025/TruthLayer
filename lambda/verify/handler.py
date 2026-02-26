@@ -1,9 +1,15 @@
 """AWS Lambda handler for the /verify endpoint."""
 
+import sys
+import os
+
+# Add Lambda Layer path so 'from src.xxx' imports work
+# Layer structure: python/python/src/ -> runtime: /opt/python/python/src/
+sys.path.insert(0, '/opt/python/python')
+
 import json
 import time
 import uuid
-import os
 import logging
 import traceback
 

@@ -47,7 +47,8 @@ def setup_layer():
     if os.path.exists(layer_src_dir):
         shutil.rmtree(layer_src_dir)
 
-    shutil.copytree(src_dir, layer_src_dir)
+    # Copy only Python source files (exclude __pycache__)
+    shutil.copytree(src_dir, layer_src_dir, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
     print("✅ Copied src/ to layer/python/src/")
 
 
@@ -58,7 +59,7 @@ def build():
     print("=" * 60)
 
     setup_layer()
-    run_cmd("sam build --use-container")
+    run_cmd("sam build")
     print("\n✅ Build complete!")
 
 

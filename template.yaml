@@ -56,8 +56,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: truthlayer-verify
-      Handler: lambda/verify/handler.handler
-      CodeUri: .
+      Handler: handler.handler
+      CodeUri: lambda/verify/
       Layers:
         - !Ref TruthLayerSharedLayer
       Timeout: 60
@@ -88,8 +88,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: truthlayer-documents
-      Handler: lambda/documents/handler.handler
-      CodeUri: .
+      Handler: handler.handler
+      CodeUri: lambda/documents/
       Layers:
         - !Ref TruthLayerSharedLayer
       Policies:
@@ -137,8 +137,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: truthlayer-analytics
-      Handler: lambda/analytics/handler.handler
-      CodeUri: .
+      Handler: handler.handler
+      CodeUri: lambda/analytics/
       Layers:
         - !Ref TruthLayerSharedLayer
       Policies:
@@ -162,8 +162,8 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: truthlayer-health
-      Handler: lambda/health/handler.handler
-      CodeUri: .
+      Handler: handler.handler
+      CodeUri: lambda/health/
       MemorySize: 128
       Timeout: 5
       Events:

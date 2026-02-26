@@ -1,0 +1,9 @@
+dashboard/
+node_modules/
+.aws-sam/
+.git/
+tests/
+docs/
+sdk/
+scripts/
+*.md

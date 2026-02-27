@@ -3,7 +3,7 @@
 ## 1. Base Configuration
 
 ```
-Base URL: https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod
+Base URL: https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod
 Content-Type: application/json
 Authentication: API Key (x-api-key header)
 Rate Limit: Serverless auto-scaling (Lambda concurrency limits apply)
@@ -64,7 +64,7 @@ Verify AI-generated content against source documents.
 
 **Curl Example:**
 ```bash
-curl -X POST https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/verify \
+curl -X POST https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod/verify \
   -H "Content-Type: application/json" \
   -H "x-api-key: tl_your_api_key" \
   -d '{
@@ -245,7 +245,7 @@ Get detailed verification history.
 ### API Key Structure
 ```
 Format: tl_{32_char_random}
-Example: tl_eX1gQKMZW5_ooax2OCl0G81oj7rkntPFR37SHg05mXk
+Example: tl_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 Generate a key:
   python scripts/generate_api_key.py "YourName"

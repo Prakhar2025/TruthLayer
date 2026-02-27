@@ -1,3 +1,4 @@
+<p align="center">
   <img src="https://img.shields.io/badge/AWS-Bedrock-FF9900?style=for-the-badge&logo=amazonaws" alt="AWS Bedrock"/>
   <img src="https://img.shields.io/badge/Latency-%3C500ms-22C55E?style=for-the-badge" alt="Latency"/>
   <img src="https://img.shields.io/badge/Precision-94%25-6366F1?style=for-the-badge" alt="Precision"/>
@@ -19,7 +20,7 @@ TruthLayer is an invisible trust layer that sits between your AI model and your 
 ```python
 from truthlayer import TruthLayer
 
-API_URL = "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod"
+API_URL = "https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod"
 tl = TruthLayer(api_key="tl_xxx", api_url=API_URL)
 
 result = tl.verify(

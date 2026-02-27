@@ -14,7 +14,7 @@
 from truthlayer import TruthLayer
 
 API_KEY = "tl_your_api_key_here"
-API_URL = "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod"
+API_URL = "https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod"
 
 tl = TruthLayer(api_key=API_KEY, api_url=API_URL)
 
@@ -50,7 +50,7 @@ from truthlayer import TruthLayer
 # Initialize client
 tl = TruthLayer(
     api_key="tl_your_api_key_here",
-    api_url="https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod",
+    api_url="https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod",
     timeout=30
 )
 ```
@@ -198,7 +198,7 @@ import { TruthLayer } from './sdk/js/truthlayer';
 
 const tl = new TruthLayer({
   apiKey: 'tl_your_api_key_here',
-  apiUrl: 'https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod',
+  apiUrl: 'https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod',
   timeout: 30000
 });
 ```
@@ -328,7 +328,7 @@ curl -X GET https://api.truthlayer.io/v1/documents/doc_abc123 \
 
 **Verify AI Response:**
 ```bash
-curl -X POST https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/verify \
+curl -X POST https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod/verify \
   -H "x-api-key: tl_your_api_key" \
   -H "Content-Type: application/json" \
   -d '{

@@ -14,7 +14,7 @@ Built entirely on AWS serverless architecture (Lambda, API Gateway, DynamoDB, an
 
 | Resource | Value |
 |----------|-------|
-| **API Base URL** | `https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod` |
+| **API Base URL** | `https://YOUR-API-ID.execute-api.us-east-1.amazonaws.com/prod` |
 | **Region** | `us-east-1` |
 | **Stack Name** | `truthlayer` |
 | **Bedrock Model** | Amazon Titan Embeddings V2 (`amazon.titan-embed-text-v2:0`) |

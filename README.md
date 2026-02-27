@@ -1,7 +1,7 @@
-<p align="center">
   <img src="https://img.shields.io/badge/AWS-Bedrock-FF9900?style=for-the-badge&logo=amazonaws" alt="AWS Bedrock"/>
-  <img src="https://img.shields.io/badge/Latency-%3C100ms-22C55E?style=for-the-badge" alt="Latency"/>
+  <img src="https://img.shields.io/badge/Latency-%3C500ms-22C55E?style=for-the-badge" alt="Latency"/>
   <img src="https://img.shields.io/badge/Precision-94%25-6366F1?style=for-the-badge" alt="Precision"/>
+  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python" alt="Python"/>
   <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"/>
 </p>
 
@@ -19,7 +19,8 @@ TruthLayer is an invisible trust layer that sits between your AI model and your 
 ```python
 from truthlayer import TruthLayer
 
-tl = TruthLayer(api_key="tl_xxx", api_url="https://your-api/prod")
+API_URL = "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod"
+tl = TruthLayer(api_key="tl_xxx", api_url=API_URL)
 
 result = tl.verify(
     "Python 3.11 is 25% faster than 3.10.",
@@ -142,16 +143,18 @@ curl -X POST https://YOUR-API/prod/verify \
 - AWS CLI configured with credentials
 - [SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html) installed
 - Bedrock Titan Embeddings V2 enabled in AWS Console
-- Python 3.9+, Node.js 18+
+- Python 3.12+, Node.js 18+
 
 ### Deploy Backend
 ```bash
-# Build and deploy to AWS
-python scripts/deploy.py all
+# Step 1: Copy src/ into layer
+python -c "import shutil; shutil.copytree('src', 'layer/python/src', dirs_exist_ok=True)"
 
-# Or manually:
-sam build --use-container
-sam deploy --guided
+# Step 2: Build
+sam build
+
+# Step 3: Deploy
+sam deploy
 ```
 
 ### Generate API Key

@@ -11,27 +11,25 @@
 ### 1.2 Basic Integration (5 minutes)
 
 ```python
-import requests
+from truthlayer import TruthLayer
 
-API_KEY = "tlk_live_your_api_key_here"
-BASE_URL = "https://api.truthlayer.io/v1"
+API_KEY = "tl_your_api_key_here"
+API_URL = "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod"
+
+tl = TruthLayer(api_key=API_KEY, api_url=API_URL)
 
 # Verify an AI response
-response = requests.post(
-    f"{BASE_URL}/verify",
-    headers={
-        "x-api-key": API_KEY,
-        "Content-Type": "application/json"
-    },
-    json={
-        "document_id": "doc_abc123",
-        "ai_response": "The company was founded in 2019 and has 500 employees."
-    }
+result = tl.verify(
+    ai_response="The company was founded in 2019 and has 500 employees.",
+    source_documents=[
+        "Founded in 2019, the company currently employs over 500 staff."
+    ]
 )
 
-result = response.json()
-print(f"Verdict: {result['overall_verdict']}")
-print(f"Confidence: {result['overall_score']}")
+print(f"Trust Score: {result.trust_score}%")
+print(f"Hallucinations: {result.has_hallucinations}")
+for claim in result.claims:
+    print(f"  {claim.status}: {claim.text} ({claim.confidence}%)")
 ```
 
 ---
@@ -47,13 +45,13 @@ pip install truthlayer
 ### 2.2 Configuration
 
 ```python
-from truthlayer import TruthLayerClient
+from truthlayer import TruthLayer
 
 # Initialize client
-client = TruthLayerClient(
-    api_key="tlk_live_your_api_key_here",
-    base_url="https://api.truthlayer.io/v1",  # Optional
-    timeout=30  # Seconds
+tl = TruthLayer(
+    api_key="tl_your_api_key_here",
+    api_url="https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod",
+    timeout=30
 )
 ```
 
@@ -83,21 +81,23 @@ document = client.documents.wait_for_ready(
 
 ```python
 # Basic verification
-result = client.verify(
-    document_id="doc_abc123",
-    ai_response="The company reported $4.2 billion in revenue."
+result = tl.verify(
+    ai_response="The company reported $4.2 billion in revenue.",
+    source_documents=[
+        "The company reported $4.2 billion in annual revenue for FY2024.",
+        "Revenue grew 12% year-over-year to reach $4.2B."
+    ]
 )
 
-print(f"Overall Score: {result.overall_score}")
-print(f"Verdict: {result.verdict}")
+print(f"Trust Score: {result.trust_score}%")
+print(f"Hallucinations detected: {result.has_hallucinations}")
 
 # Iterate through claims
 for claim in result.claims:
-    print(f"  - {claim.text}")
-    print(f"    Confidence: {claim.confidence}")
-    print(f"    Verdict: {claim.verdict}")
-    if claim.source_chunk:
-        print(f"    Source: {claim.source_chunk[:100]}...")
+    print(f"  [{claim.status}] {claim.text}")
+    print(f"    Confidence: {claim.confidence}%")
+    if claim.matched_source:
+        print(f"    Source: {claim.matched_source[:100]}...")
 ```
 
 ### 2.5 Verification with Options
@@ -194,12 +194,12 @@ yarn add @truthlayer/sdk
 ### 3.2 Configuration
 
 ```typescript
-import { TruthLayerClient } from '@truthlayer/sdk';
+import { TruthLayer } from './sdk/js/truthlayer';
 
-const client = new TruthLayerClient({
-  apiKey: 'tlk_live_your_api_key_here',
-  baseUrl: 'https://api.truthlayer.io/v1', // Optional
-  timeout: 30000 // Milliseconds
+const tl = new TruthLayer({
+  apiKey: 'tl_your_api_key_here',
+  apiUrl: 'https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod',
+  timeout: 30000
 });
 ```
 
@@ -230,19 +230,18 @@ const readyDoc = await client.documents.waitForReady(document.id, {
 
 ```typescript
 // Basic verification
-const result = await client.verify({
-  documentId: 'doc_abc123',
-  aiResponse: 'The company reported $4.2 billion in revenue.'
-});
+const result = await tl.verify(
+  'The company reported $4.2 billion in revenue.',
+  ['The company reported $4.2 billion in annual revenue for FY2024.']
+);
 
-console.log(`Overall Score: ${result.overallScore}`);
-console.log(`Verdict: ${result.verdict}`);
+console.log(`Trust Score: ${result.trustScore}%`);
+console.log(`Hallucinations: ${result.hasHallucinations}`);
 
 // Process claims
 result.claims.forEach(claim => {
-  console.log(`  - ${claim.text}`);
-  console.log(`    Confidence: ${claim.confidence}`);
-  console.log(`    Verdict: ${claim.verdict}`);
+  console.log(`  [${claim.status}] ${claim.text}`);
+  console.log(`    Confidence: ${claim.confidence}%`);
 });
 ```
 
@@ -329,12 +328,12 @@ curl -X GET https://api.truthlayer.io/v1/documents/doc_abc123 \
 
 **Verify AI Response:**
 ```bash
-curl -X POST https://api.truthlayer.io/v1/verify \
-  -H "x-api-key: tlk_live_abc123xyz" \
+curl -X POST https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/verify \
+  -H "x-api-key: tl_your_api_key" \
   -H "Content-Type: application/json" \
   -d '{
-    "document_id": "doc_abc123",
-    "ai_response": "The company was founded in 2019 with 500 employees."
+    "ai_response": "The company was founded in 2019 with 500 employees.",
+    "source_documents": ["Founded in 2019, the company currently employs over 500 staff."]
   }'
 ```
 

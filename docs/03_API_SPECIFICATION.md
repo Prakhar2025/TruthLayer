@@ -3,10 +3,10 @@
 ## 1. Base Configuration
 
 ```
-Base URL: https://api.truthlayer.io/v1
+Base URL: https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod
 Content-Type: application/json
 Authentication: API Key (x-api-key header)
-Rate Limit: 100 req/sec burst, 50 req/sec sustained
+Rate Limit: Serverless auto-scaling (Lambda concurrency limits apply)
 ```
 
 ---
@@ -20,13 +20,11 @@ Verify AI-generated content against source documents.
 **Request:**
 ```json
 {
-  "document_id": "doc_abc123",
   "ai_response": "The company was founded in 2019 and has 500 employees.",
-  "options": {
-    "extract_claims": true,
-    "min_confidence": 0.6,
-    "max_claims": 10
-  }
+  "source_documents": [
+    "Founded in 2019, the company currently employs over 500 staff.",
+    "The company was established in San Francisco in 2019."
+  ]
 }
 ```
 
@@ -66,12 +64,12 @@ Verify AI-generated content against source documents.
 
 **Curl Example:**
 ```bash
-curl -X POST https://api.truthlayer.io/v1/verify \
+curl -X POST https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/verify \
   -H "Content-Type: application/json" \
-  -H "x-api-key: tlk_live_abc123xyz" \
+  -H "x-api-key: tl_your_api_key" \
   -d '{
-    "document_id": "doc_abc123",
-    "ai_response": "The company was founded in 2019."
+    "ai_response": "The company was founded in 2019.",
+    "source_documents": ["Founded in 2019, the company currently employs over 500 staff."]
   }'
 ```
 
@@ -246,10 +244,11 @@ Get detailed verification history.
 
 ### API Key Structure
 ```
-Format: tlk_{environment}_{32_char_random}
-Examples:
-  - Production: tlk_live_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
-  - Development: tlk_test_x9y8z7w6v5u4t3s2r1q0p9o8n7m6l5k4
+Format: tl_{32_char_random}
+Example: tl_eX1gQKMZW5_ooax2OCl0G81oj7rkntPFR37SHg05mXk
+
+Generate a key:
+  python scripts/generate_api_key.py "YourName"
 ```
 
 ### Authentication Flow

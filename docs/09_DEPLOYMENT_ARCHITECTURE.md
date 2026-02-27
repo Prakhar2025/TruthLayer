@@ -10,40 +10,39 @@
 | AWS SAM | Serverless application deployment | 1.100+ |
 | GitHub Actions | CI/CD automation | N/A |
 
-### 1.2 Directory Structure
+### 1.2 Actual Project Structure
 
 ```
-truthlayer/
-├── infrastructure/
-│   ├── cloudformation/
-│   │   ├── main.yaml              # Root stack
-│   │   ├── api-gateway.yaml       # API Gateway resources
-│   │   ├── lambda.yaml            # Lambda functions
-│   │   ├── dynamodb.yaml          # DynamoDB tables
-│   │   ├── s3.yaml                # S3 buckets
-│   │   └── iam.yaml               # IAM roles and policies
-│   ├── parameters/
-│   │   ├── dev.json               # Dev environment params
-│   │   ├── staging.json           # Staging environment params
-│   │   └── prod.json              # Production environment params
-│   └── scripts/
-│       ├── deploy.sh              # Deployment script
-│       ├── teardown.sh            # Cleanup script
-│       └── validate.sh            # Template validation
-├── src/
-│   ├── lambda/
-│   │   ├── verification/          # Verification Lambda
-│   │   ├── document_processor/    # Document processing Lambda
-│   │   └── analytics/             # Analytics Lambda
-│   └── layers/
-│       └── common/                # Shared code layer
-├── frontend/
-│   └── dashboard/                 # React dashboard
-└── .github/
-    └── workflows/
-        ├── deploy-dev.yaml        # Dev deployment
-        ├── deploy-staging.yaml    # Staging deployment
-        └── deploy-prod.yaml       # Production deployment
+TruthLayer/
+├── template.yaml                 # SAM template — all infra defined here
+├── samconfig.toml                # SAM deployment config (stack name, region, S3 bucket)
+├── .samignore                    # Excludes dashboard/node_modules from SAM build
+├── src/                          # Core verification engine (in Lambda Layer)
+│   ├── embeddings/               # Bedrock Titan V2 embedding provider
+│   ├── verifier/                 # Claim extraction + similarity pipeline
+│   ├── mocks/                    # Mock providers for local testing
+│   ├── utils/                    # Shared utilities
+│   └── config.py                 # Environment configuration
+├── lambda/                       # Lambda function handlers (CodeUri per function)
+│   ├── verify/handler.py         # POST /verify
+│   ├── documents/handler.py      # CRUD /documents
+│   ├── analytics/handler.py      # GET /analytics
+│   └── health/handler.py         # GET /health
+├── layer/                        # Lambda Layer (shared dependencies)
+│   ├── python/src/               # src/ copied here before sam build
+│   └── requirements.txt          # numpy and shared pip deps
+├── dashboard/                    # Next.js dashboard
+│   └── src/app/
+│       ├── page.tsx              # Landing page
+│       └── dashboard/            # Dashboard pages (verify, documents, analytics, health)
+├── sdk/
+│   ├── python/truthlayer.py      # Python SDK (stdlib only, zero deps)
+│   └── js/truthlayer.ts          # TypeScript SDK (native fetch)
+├── scripts/
+│   ├── deploy.py                 # Build + deploy orchestrator
+│   ├── generate_api_key.py       # API key generator (writes to DynamoDB)
+│   └── test_api.sh               # End-to-end API test script
+└── tests/                        # Unit test suite (25 tests)
 ```
 
 ---
@@ -605,15 +604,16 @@ jobs:
 ]
 ```
 
-### 4.2 Environment Comparison
+### 4.2 Environment Configuration
 
-| Configuration | Dev | Staging | Prod |
-|---------------|-----|---------|------|
-| API Domain | api-dev.truthlayer.io | api-staging.truthlayer.io | api.truthlayer.io |
-| Lambda Memory | 512 MB | 512 MB | 512 MB |
-| Lambda Timeout | 10s | 10s | 10s |
-| DynamoDB Mode | On-Demand | On-Demand | On-Demand |
-| Log Retention | 7 days | 14 days | 30 days |
-| X-Ray Tracing | Enabled | Enabled | Enabled |
-| WAF | Disabled | Enabled | Enabled |
-| CloudWatch Alarms | Basic | Standard | Full |
+| Configuration | Current (prod) | Future (with caching) |
+|---------------|----------------|------------------------|
+| Stack Name | `truthlayer` | `truthlayer` |
+| Region | `us-east-1` | `us-east-1` |
+| Lambda Runtime | Python 3.9 (→ 3.12 upgrade planned) | Python 3.12 |
+| Lambda Memory | 1024 MB (verify/docs/analytics) | 1024 MB |
+| Verify Timeout | 60s | 30s |
+| DynamoDB Mode | On-Demand | On-Demand |
+| Embedding Cache | Disabled | DynamoDB TTL 7 days |
+| X-Ray Tracing | Disabled | Enabled |
+| API Stage | `prod` | `prod` |

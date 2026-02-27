@@ -5,20 +5,25 @@
 ### 1.1 End-to-End Verification Latency
 
 ```
-Target: < 100ms end-to-end (p95)
+Target: < 500ms end-to-end warm (< 100ms with embedding caching — roadmap)
+
+> **Current Measured Performance (live AWS deployment):**
+> - Cold start: ~600ms (first request after idle)
+> - Warm start: ~450ms (Bedrock embedding call dominates)
+> - Target after caching: < 100ms (embeddings stored in DynamoDB, reused on repeat docs)
 
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                        LATENCY BREAKDOWN                                    │
+│                        LATENCY BREAKDOWN (WARM)                             │
 ├────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  API Gateway    Lambda Init   Claim Extract   Bedrock      Match & Score   │
 │  ────────────   ───────────   ─────────────   ─────────    ─────────────   │
-│     5ms            0ms*          15ms           35ms           25ms         │
+│     5ms            0ms*          15ms           380ms          50ms         │
 │     ████           ░░░░          ██████         ████████████   ████████     │
 │                                                                             │
-│  * Lambda kept warm via provisioned concurrency or traffic patterns        │
+│  * Lambda kept warm via sustained traffic                                   │
 │                                                                             │
-│  Total: 80ms (with 20ms buffer for variance)                               │
+│  Total (current): ~450ms    Total (with caching): ~80ms target              │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 

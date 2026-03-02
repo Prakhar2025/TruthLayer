@@ -139,7 +139,7 @@ function Hero() {
             Try Live Demo <ArrowRight size={18} style={{ marginLeft: 6 }} />
           </Link>
           <a
-            href="https://github.com/prakhar-shukla/truthlayer"
+            href="https://github.com/Prakhar2025/TruthLayer"
             target="_blank"
             className="btn-secondary"
             style={{ textDecoration: "none", display: "flex", alignItems: "center", gap: 8 }}

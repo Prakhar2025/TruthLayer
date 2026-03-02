@@ -1,5 +1,9 @@
 """AWS Lambda handler for analytics endpoints."""
 
+import sys
+sys.path.insert(0, '/opt/python/python')
+sys.path.insert(0, '/opt/python')
+
 import json
 import time
 import logging
@@ -47,6 +51,12 @@ def handler(event, context):
     """
     if event.get("httpMethod") == "OPTIONS":
         return build_response(200, {"message": "OK"})
+
+    # Validate API key
+    from src.utils.auth import validate_api_key
+    is_valid, error_response = validate_api_key(event)
+    if not is_valid:
+        return error_response
 
     try:
         query_params = event.get("queryStringParameters") or {}

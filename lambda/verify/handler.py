@@ -6,6 +6,7 @@ import os
 # Add Lambda Layer path so 'from src.xxx' imports work
 # Layer structure: python/python/src/ -> runtime: /opt/python/python/src/
 sys.path.insert(0, '/opt/python/python')
+sys.path.insert(0, '/opt/python')
 
 import json
 import time
@@ -100,9 +101,15 @@ def handler(event, context):
 
     Returns verification result with claims, summary, and metadata.
     """
-    # Handle CORS preflight
+    # Handle CORS preflight — no auth needed
     if event.get("httpMethod") == "OPTIONS":
         return build_response(200, {"message": "OK"})
+
+    # Validate API key
+    from src.utils.auth import validate_api_key
+    is_valid, error_response = validate_api_key(event)
+    if not is_valid:
+        return error_response
 
     start_time = time.time()
 

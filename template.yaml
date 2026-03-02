@@ -70,6 +70,8 @@ Resources:
             TableName: !Ref EmbeddingsTable
         - DynamoDBCrudPolicy:
             TableName: !Ref DocumentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ApiKeysTable
       Events:
         VerifyPost:
           Type: Api
@@ -95,6 +97,8 @@ Resources:
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref DocumentsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ApiKeysTable
       Events:
         DocumentsPost:
           Type: Api
@@ -144,6 +148,8 @@ Resources:
       Policies:
         - DynamoDBReadPolicy:
             TableName: !Ref VerificationsTable
+        - DynamoDBReadPolicy:
+            TableName: !Ref ApiKeysTable
       Events:
         AnalyticsGet:
           Type: Api

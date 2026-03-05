@@ -168,7 +168,9 @@ class TruthLayerVerifier:
                 "embedding_ms": round(embed_time * 1000, 2),
                 "provider": type(self.embedding_provider).__name__,
                 "total_claims": len(claims),
-                "source_chunks": len(source_chunks)
+                "source_chunks": len(source_chunks),
+                "cache_hits": getattr(self.embedding_provider, 'last_cache_hits', 0),
+                "cache_misses": getattr(self.embedding_provider, 'last_cache_misses', 0),
             }
         }
 

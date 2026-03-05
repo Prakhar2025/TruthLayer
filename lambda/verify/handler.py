@@ -20,6 +20,7 @@ logger.setLevel(logging.INFO)
 # Initialize outside handler for connection reuse (cold start optimization)
 _verifier = None
 _verifications_table = None
+_documents_table = None
 
 
 def get_verifier():
@@ -28,9 +29,11 @@ def get_verifier():
     if _verifier is None:
         from src.verifier.verifier import TruthLayerVerifier
         from src.embeddings.bedrock_provider import BedrockEmbeddingProvider
-        provider = BedrockEmbeddingProvider()
+        from src.embeddings.cached_provider import CachedEmbeddingProvider
+        inner = BedrockEmbeddingProvider()
+        provider = CachedEmbeddingProvider(inner_provider=inner)
         _verifier = TruthLayerVerifier(embedding_provider=provider)
-        logger.info("TruthLayerVerifier initialized with Bedrock provider")
+        logger.info("TruthLayerVerifier initialized with cached Bedrock provider")
     return _verifier
 
 
@@ -43,6 +46,54 @@ def get_verifications_table():
         table_name = os.environ.get("VERIFICATIONS_TABLE", "TruthLayerVerifications")
         _verifications_table = dynamodb.Table(table_name)
     return _verifications_table
+
+
+def get_documents_table():
+    """Lazy-initialize DynamoDB documents table."""
+    global _documents_table
+    if _documents_table is None:
+        import boto3
+        dynamodb = boto3.resource("dynamodb", region_name=os.environ.get("AWS_REGION", "us-east-1"))
+        table_name = os.environ.get("DOCUMENTS_TABLE", "TruthLayerDocuments")
+        _documents_table = dynamodb.Table(table_name)
+    return _documents_table
+
+
+def resolve_document_ids(document_ids):
+    """
+    Fetch document content from DynamoDB by IDs.
+
+    Args:
+        document_ids: List of document_id strings
+
+    Returns:
+        Tuple of (resolved_texts: list[str], errors: list[str])
+    """
+    resolved = []
+    errors = []
+    table = get_documents_table()
+
+    for doc_id in document_ids:
+        try:
+            # 'content' is a DynamoDB reserved word — must use alias
+            response = table.get_item(
+                Key={"document_id": doc_id},
+                ProjectionExpression="#c, title",
+                ExpressionAttributeNames={"#c": "content"},
+            )
+            item = response.get("Item")
+            if item and item.get("content"):
+                resolved.append(item["content"])
+            else:
+                errors.append(f"Document '{doc_id}' not found or has no content")
+        except Exception as e:
+            logger.error(f"Failed to fetch document {doc_id}: {e}")
+            errors.append(f"Failed to fetch document '{doc_id}'")
+
+    if errors:
+        logger.warning(f"Document resolution issues: {errors}")
+
+    return resolved, errors
 
 
 def save_verification(result):
@@ -92,12 +143,16 @@ def handler(event, context):
     Expects JSON body:
     {
         "ai_response": "Text to verify...",
-        "source_documents": ["Source 1", "Source 2"],
+        "source_documents": ["Source 1", "Source 2"],  // optional if document_ids provided
+        "document_ids": ["doc-uuid-1", "doc-uuid-2"],  // optional if source_documents provided
         "options": {  // optional
             "verified_threshold": 0.80,
             "uncertain_threshold": 0.55
         }
     }
+
+    At least one of source_documents or document_ids must be provided.
+    Both can be provided — their contents are merged.
 
     Returns verification result with claims, summary, and metadata.
     """
@@ -121,6 +176,7 @@ def handler(event, context):
 
         ai_response = body.get("ai_response", "")
         source_documents = body.get("source_documents", [])
+        document_ids = body.get("document_ids", [])
         options = body.get("options", {})
 
         # Validate input
@@ -130,10 +186,32 @@ def handler(event, context):
                 "message": "ai_response is required and cannot be empty"
             })
 
+        # Resolve document IDs to content
+        if document_ids:
+            if not isinstance(document_ids, list):
+                return build_response(400, {
+                    "error": "INVALID_INPUT",
+                    "message": "document_ids must be a list of document ID strings"
+                })
+            if len(document_ids) > 20:
+                return build_response(400, {
+                    "error": "INPUT_TOO_LARGE",
+                    "message": "Maximum 20 document_ids allowed"
+                })
+            resolved_docs, resolve_errors = resolve_document_ids(document_ids)
+            if resolve_errors and not resolved_docs and not source_documents:
+                return build_response(404, {
+                    "error": "DOCUMENTS_NOT_FOUND",
+                    "message": "None of the provided document_ids could be resolved",
+                    "details": resolve_errors
+                })
+            source_documents = source_documents + resolved_docs
+
+        # Must have at least one source
         if not source_documents or not isinstance(source_documents, list):
             return build_response(400, {
                 "error": "INVALID_INPUT",
-                "message": "source_documents is required and must be a non-empty list"
+                "message": "At least one of source_documents or document_ids is required"
             })
 
         # Validate text lengths

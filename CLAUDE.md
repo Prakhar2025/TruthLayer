@@ -19,26 +19,31 @@ TruthLayer/
 │   ├── config.py              # All thresholds and env vars (VERIFIED: 0.80, UNCERTAIN: 0.55)
 │   ├── embeddings/
 │   │   ├── base.py            # EmbeddingProvider abstract base class
-│   │   └── bedrock_provider.py # Titan Embeddings V2 (amazon.titan-embed-text-v2:0, 1024-dim)
+│   │   ├── bedrock_provider.py # Titan Embeddings V2 (amazon.titan-embed-text-v2:0, 1024-dim)
+│   │   └── cached_provider.py # CachedEmbeddingProvider — DynamoDB cache wrapper (SHA-256)
 │   ├── verifier/
-│   │   ├── verifier.py        # TruthLayerVerifier — main orchestrator
+│   │   ├── verifier.py        # TruthLayerVerifier — main orchestrator (returns cache_hits/misses)
 │   │   ├── claim_extractor.py # Splits AI response into individual factual claims
 │   │   ├── similarity_engine.py # Cosine similarity between claim and source vectors
 │   │   └── confidence_scorer.py # Maps similarity score → VERIFIED/UNCERTAIN/UNSUPPORTED
 │   ├── mocks/
 │   │   └── embedding_provider.py # MockEmbeddingProvider (TF-IDF, no AWS needed for tests)
 │   └── utils/
-│       ├── auth.py            # API key validation: SHA-256 hash → DynamoDB lookup
+│       ├── auth.py            # API key: SHA-256 hash → DynamoDB + rate limit enforcement
 │       └── text_splitter.py   # Chunk documents into MAX_CHUNK_SIZE=500, OVERLAP=50
 ├── lambda/                    # Lambda function handlers
-│   ├── verify/handler.py      # POST /verify — main verification endpoint
+│   ├── verify/handler.py      # POST /verify — supports source_documents AND document_ids
 │   ├── documents/handler.py   # GET/POST/DELETE /documents
 │   ├── analytics/handler.py   # GET /analytics
 │   └── health/handler.py      # GET /health (no auth, public)
-├── layer/                     # Lambda Layer build directory
+├── layer/                     # Lambda Layer build directory (GITIGNORED — auto-generated)
 │   └── python/src/            # src/ is copied here before sam build
+├── examples/                  # Integration demo scripts
+│   ├── customer_support_chatbot.py  # Policy verification demo
+│   ├── document_qa.py               # Upload-by-ID verification flow
+│   └── legal_contract_analyzer.py  # Contract hallucination risk scoring
 ├── sdk/
-│   ├── python/truthlayer.py   # Python SDK (stdlib only, zero pip deps)
+│   ├── python/truthlayer.py   # Python SDK: verify(), upload/get/list/delete_document()
 │   └── js/truthlayer.ts       # TypeScript SDK (native fetch)
 ├── dashboard/                 # Next.js 16 dashboard (deployed to Vercel)
 │   └── src/
@@ -48,7 +53,7 @@ TruthLayer/
 │   ├── generate_api_key.py    # Creates tl_{token_urlsafe(32)}, stores SHA-256 in DynamoDB
 │   ├── deploy.py              # Build + deploy orchestrator
 │   └── test_api.sh            # End-to-end API test script
-└── tests/                     # 25 pytest unit tests (MockEmbeddingProvider, no AWS needed)
+└── tests/                     # 32 pytest unit tests (MockEmbeddingProvider, no AWS needed)
 ```
 
 ---
@@ -69,9 +74,11 @@ TruthLayer/
 ### NEVER do this:
 - Commit real API keys (`tl_xxx`) to any file
 - Commit `dashboard/.env.local`
+- Commit anything inside `layer/python/` — it's gitignored (build artifact)
 - Change `src/` without also running: `python -c "import shutil; shutil.copytree('src', 'layer/python/src', dirs_exist_ok=True)"`
 - Add `--use-container` or `--guided` to sam commands
 - Use `TruthLayerClient` — the class is `TruthLayer`
+- Call `verify()` without either `source_documents` or `document_ids`
 
 ### ALWAYS do this:
 - Copy `src/` to `layer/python/src/` before `sam build`
@@ -92,7 +99,7 @@ sam deploy
 # Generate a new API key
 python scripts/generate_api_key.py "OwnerName"
 
-# Run all 25 unit tests (no AWS needed)
+# Run all 32 unit tests (no AWS needed)
 pytest tests/ -v
 
 # Run tests with coverage
@@ -103,6 +110,13 @@ cd dashboard && npm run dev
 
 # Test API health
 curl https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/health
+
+# Run integration demos (set env vars first)
+export TRUTHLAYER_API_URL=https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod
+export TRUTHLAYER_API_KEY=tl_your_key
+python examples/legal_contract_analyzer.py
+python examples/customer_support_chatbot.py
+python examples/document_qa.py
 ```
 
 ---
@@ -129,11 +143,19 @@ curl https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/health
 ```json
 {
   "ai_response": "Text to verify",
-  "source_documents": ["Source doc 1", "Source doc 2"],
+  "source_documents": ["Source doc 1"],   // optional if document_ids provided
+  "document_ids": ["uuid-from-documents"], // optional if source_documents provided
   "options": { "verified_threshold": 0.80, "uncertain_threshold": 0.55 }
 }
 ```
-Returns: `claims[]` with `status`, `confidence`, `similarity_score`, `matched_source` + `summary` + `metadata`.
+Returns: `claims[]` with `status`, `confidence`, `similarity_score`, `matched_source`
++ `summary` + `metadata` (includes `cache_hits`, `cache_misses`, `latency_ms`).
+
+Response metadata fields:
+- `cache_hits` — how many embeddings came from DynamoDB cache
+- `cache_misses` — how many required a Bedrock API call
+- `embedding_ms` — time spent on embeddings only
+- `latency_ms` — total verification time
 
 ### POST /documents
 Upload a source document. Returns `document_id` for future reference.
@@ -155,12 +177,21 @@ similarity_score < UNCERTAIN_THRESHOLD           → UNSUPPORTED 🔴
 
 ---
 
-## What's Next (Roadmap)
-1. **Embedding caching** — store chunk vectors in `TruthLayerEmbeddings` DynamoDB table, skip re-embedding when doc unchanged → target <100ms warm latency
-2. **Document ID in /verify** — accept `document_ids: ["doc_abc"]` instead of raw text
-3. **Rate limiting enforcement** — check `rate_limit` and `usage_count` in auth.py
-4. **3 demo integrations** — customer support chatbot, doc QA, legal analyzer
-5. **Builder Center article** — required for AWS competition March 13 deadline
+## AWS Budget Alert
+Set to **$20/month** — alerts at 85% ($17) and 100% ($20) and forecasted 100%.
+Email: prakhar230125@gmail.com
+
+## What's Done (Production-Ready)
+1. **Embedding caching** — `CachedEmbeddingProvider` wraps Bedrock with DynamoDB cache
+   - SHA-256 text hash as key, 7-day TTL, non-fatal cache failures
+   - Response includes `cache_hits`/`cache_misses` in metadata
+2. **Document ID in /verify** — pass `document_ids` instead of raw text
+   - Resolves content from `TruthLayerDocuments`, merges with inline sources
+3. **Rate limiting** — `usage_count >= rate_limit` returns 429 with `Retry-After`
+   - Atomic DynamoDB UpdateItem increment on every valid request
+4. **3 integration demos** — `examples/` directory
+5. **Python SDK** — `verify(document_ids=...)`, `upload_document()`, `delete_document()`
+6. **32 tests passing** — full regression suite
 
 ---
 

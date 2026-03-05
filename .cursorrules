@@ -10,7 +10,7 @@
 - Python 3.9 (Lambda runtime) — all backend code
 - Next.js 16 + TypeScript (dashboard only)
 - AWS SAM (IaC) — template.yaml is the single source of truth
-- pytest (25 unit tests, MockEmbeddingProvider, no AWS needed)
+- pytest (32 unit tests, MockEmbeddingProvider, no AWS needed)
 
 ## Code Conventions — Python
 
@@ -36,6 +36,16 @@ Always use `Decimal` for float values stored in DynamoDB:
 ```python
 from decimal import Decimal
 item["score"] = Decimal(str(float_value))
+```
+
+### DynamoDB Reserved Words
+`content`, `name`, `status`, `value` are reserved words. Always alias with `ExpressionAttributeNames`:
+```python
+table.get_item(
+    Key={"document_id": doc_id},
+    ProjectionExpression="#c",
+    ExpressionAttributeNames={"#c": "content"},
+)
 ```
 
 ### Error Handling
@@ -105,12 +115,21 @@ Always use `process.env.NEXT_PUBLIC_API_URL` and `process.env.NEXT_PUBLIC_API_KE
 ## Testing
 - All tests use `MockEmbeddingProvider` — no AWS credentials needed
 - Run: `pytest tests/ -v`
-- 25 tests must pass before any deploy
+- 32 tests must pass before any deploy
 - Test files in `tests/` directory
 
 ## What NOT to do
 - Do not add `--use-container` to `sam build`
 - Do not add `--guided` to `sam deploy`
 - Do not use class name `TruthLayerClient` (correct name: `TruthLayer`)
-- Do not put raw source documents in every verify call if document IDs exist
+- Do not call `verify()` without `source_documents` or `document_ids` — raises ValueError
+- Do not commit anything in `layer/python/` — gitignored build artifact
 - Do not skip copying `src/` to `layer/` before building
+- Do not use `ProjectionExpression` with reserved words without `ExpressionAttributeNames`
+
+## Key Files Added (Steps 1–4)
+- `src/embeddings/cached_provider.py` — DynamoDB cache wrapper (SHA-256, 7-day TTL)
+- `src/utils/auth.py` — now includes rate limit check + atomic usage_count increment
+- `lambda/verify/handler.py` — now accepts `document_ids` alongside `source_documents`
+- `sdk/python/truthlayer.py` — `verify(document_ids=...)`, `upload/delete_document()`
+- `examples/` — 3 integration demos (customer support, document QA, legal analyzer)

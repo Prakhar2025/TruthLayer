@@ -73,6 +73,8 @@ Invoke-WebRequest -Uri "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/p
 | `src/lib/` not committing | `lib/` in root .gitignore caught dashboard path | Changed to `/lib/` (root-only) |
 | Badges stacking vertically in README | Missing `<p align="center">` opening tag | Always ensure tag is at line 1 |
 | sam build reports exit 1 | PowerShell stderr noise | Not a real error, check .aws-sam/build/ |
+| `content` in DynamoDB ProjectionExpression | `content` is a reserved word — throws ValidationException | Use `ExpressionAttributeNames={"#c": "content"}` |
+| `layer/python/` showing in git status | Files were committed before gitignore rule | Run `git rm -r --cached layer/python/` once |
 
 ---
 
@@ -80,8 +82,11 @@ Invoke-WebRequest -Uri "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/p
 The current API key is in `dashboard/.env.local` (NOT committed).
 The key format is `tl_{43_chars}`. Never commit real keys.
 
+## AWS Budget
+Set to **$20/month**. Alerts at 85% ($17) and 100% ($20).
+
 ---
 
 ## Competition Deadline
 **March 13, 2026** — Semi-finalist prototype article due.
-Priority: Embedding caching → Document IDs → 3 real integrations → Article.
+Status: Embedding caching ✓, Document IDs ✓, Rate limiting ✓, 3 integrations ✓

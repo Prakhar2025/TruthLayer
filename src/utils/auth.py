@@ -77,7 +77,36 @@ def validate_api_key(event):
                 }
             }
 
-        logger.info(f"Valid API key for owner: {item.get('owner', 'unknown')}")
+        # Check rate limit
+        usage_count = int(item.get("usage_count", 0))
+        rate_limit = int(item.get("rate_limit", 1000))
+        if usage_count >= rate_limit:
+            logger.warning(
+                f"Rate limit exceeded for owner={item.get('owner', 'unknown')}: "
+                f"{usage_count}/{rate_limit}"
+            )
+            return False, {
+                "statusCode": 429,
+                "body": '{"error": "RATE_LIMITED", "message": "API key rate limit exceeded. Try again tomorrow."}',
+                "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                    "Retry-After": "3600",
+                }
+            }
+
+        # Increment usage count atomically
+        try:
+            table.update_item(
+                Key={"api_key_hash": key_hash},
+                UpdateExpression="SET usage_count = if_not_exists(usage_count, :zero) + :one",
+                ExpressionAttributeValues={":zero": 0, ":one": 1},
+            )
+        except Exception as ue:
+            # Non-fatal — don't block request if counter update fails
+            logger.warning(f"Failed to increment usage_count: {ue}")
+
+        logger.info(f"Valid API key for owner: {item.get('owner', 'unknown')} (usage: {usage_count + 1}/{rate_limit})")
         return True, None
 
     except Exception as e:

@@ -114,25 +114,32 @@ class TruthLayer:
     def verify(
         self,
         ai_response: str,
-        source_documents: List[str],
+        source_documents: Optional[List[str]] = None,
+        document_ids: Optional[List[str]] = None,
     ) -> VerificationResult:
         """
         Verify an AI response against source documents.
 
         Args:
             ai_response: The AI-generated text to verify
-            source_documents: List of source documents
+            source_documents: List of source document texts (optional if document_ids provided)
+            document_ids: List of uploaded document IDs (optional if source_documents provided)
 
         Returns:
             VerificationResult with claims, summary, and metadata
 
         Raises:
             TruthLayerError: If the API request fails
+            ValueError: If neither source_documents nor document_ids is provided
         """
-        payload = {
-            "ai_response": ai_response,
-            "source_documents": source_documents,
-        }
+        if not source_documents and not document_ids:
+            raise ValueError("At least one of source_documents or document_ids is required")
+
+        payload = {"ai_response": ai_response}
+        if source_documents:
+            payload["source_documents"] = source_documents
+        if document_ids:
+            payload["document_ids"] = document_ids
 
         data = self._request("POST", "/verify", payload)
 
@@ -153,6 +160,42 @@ class TruthLayer:
             metadata=data.get("metadata", {}),
             raw=data,
         )
+
+    def upload_document(
+        self,
+        content: str,
+        title: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Upload a source document for later verification by ID.
+
+        Args:
+            content: Full text content of the document
+            title: Optional document title
+            metadata: Optional metadata dict
+
+        Returns:
+            Dict with document_id and creation details
+        """
+        payload = {"content": content}
+        if title:
+            payload["title"] = title
+        if metadata:
+            payload["metadata"] = metadata
+        return self._request("POST", "/documents", payload)
+
+    def get_document(self, document_id: str) -> Dict[str, Any]:
+        """Get a document by ID."""
+        return self._request("GET", f"/documents/{document_id}")
+
+    def list_documents(self) -> Dict[str, Any]:
+        """List all uploaded documents."""
+        return self._request("GET", "/documents")
+
+    def delete_document(self, document_id: str) -> Dict[str, Any]:
+        """Delete a document by ID."""
+        return self._request("DELETE", f"/documents/{document_id}")
 
     def health(self) -> Dict[str, Any]:
         """Check API health."""

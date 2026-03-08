@@ -2,18 +2,24 @@
 
 import os
 
-# ---------- Similarity Thresholds ----------
-# Calibrated for Amazon Bedrock Titan Embed Text v2 (1024-dim).
-# Titan cosine-similarity scores are typically lower than sentence-transformers
-# models. Empirical ranges observed on our benchmark suite:
+# Calibrated for Amazon Bedrock Titan Embed Text v2 (1024-dim)
+# COMBINED with entity_checker.py which applies multiplicative penalties
+# for numerical/negation contradictions.
+#
+# Two-signal verification:
+#   Signal 1 (embeddings): captures topical/semantic relevance
+#   Signal 2 (entity checker): catches literal contradictions
+#
+# Empirical ranges (Titan cosine similarity):
 #   - Exact / near-exact match:      0.55 – 0.85
 #   - Paraphrased but correct:       0.35 – 0.55
-#   - Subtly hallucinated (wrong #): 0.25 – 0.40
+#   - Subtly hallucinated (wrong #): 0.25 – 0.45 (before penalty)
+#   - After entity penalty (×0.5):   0.12 – 0.22 (→ UNSUPPORTED)
 #   - Completely fabricated:          0.05 – 0.25
 #
 # These thresholds can be overridden via environment variables.
-VERIFIED_THRESHOLD = float(os.environ.get("VERIFIED_THRESHOLD", "0.60"))
-UNCERTAIN_THRESHOLD = float(os.environ.get("UNCERTAIN_THRESHOLD", "0.35"))
+VERIFIED_THRESHOLD = float(os.environ.get("VERIFIED_THRESHOLD", "0.65"))
+UNCERTAIN_THRESHOLD = float(os.environ.get("UNCERTAIN_THRESHOLD", "0.40"))
 
 # ---------- AWS Bedrock Settings ----------
 BEDROCK_MODEL_ID = os.environ.get(

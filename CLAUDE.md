@@ -3,9 +3,9 @@
 ## What This Project Is
 TruthLayer is a **production serverless API** that verifies AI-generated outputs against source documents using semantic similarity. It sits between AI models and end users, catching hallucinated claims in real time.
 
-- **Not a toy.** This is a deployed AWS API used in a real competition (AWS 10,000 AIdeas — Top 1,000 Semi-Finalist).
-- **Not frontend-heavy.** The core value is the verification engine and REST API. The dashboard is secondary.
-- **Goal:** Sub-100ms latency, 94%+ precision, one-line developer integration.
+- **Not a toy.** This is a deployed AWS API for the AWS 10,000 AIdeas Competition — Top 1,000 Semi-Finalist.
+- **Not frontend-heavy.** The core value is the dual-signal verification engine (embeddings + entity checker).
+- **Benchmarks:** Sub-1s latency, 100% precision, 87 tests passing.
 
 ---
 
@@ -53,7 +53,7 @@ TruthLayer/
 │   ├── generate_api_key.py    # Creates tl_{token_urlsafe(32)}, stores SHA-256 in DynamoDB
 │   ├── deploy.py              # Build + deploy orchestrator
 │   └── test_api.sh            # End-to-end API test script
-└── tests/                     # 32 pytest unit tests (MockEmbeddingProvider, no AWS needed)
+└── tests/                     # 87 pytest unit tests (MockEmbeddingProvider, no AWS needed)
 ```
 
 ---
@@ -99,7 +99,7 @@ sam deploy
 # Generate a new API key
 python scripts/generate_api_key.py "OwnerName"
 
-# Run all 32 unit tests (no AWS needed)
+# Run all 87 unit tests (no AWS needed)
 pytest tests/ -v
 
 # Run tests with coverage
@@ -182,16 +182,17 @@ Set to **$20/month** — alerts at 85% ($17) and 100% ($20) and forecasted 100%.
 Email: prakhar230125@gmail.com
 
 ## What's Done (Production-Ready)
-1. **Embedding caching** — `CachedEmbeddingProvider` wraps Bedrock with DynamoDB cache
+1. **Dual-signal verification** — Semantic embeddings + entity contradiction checker
+2. **Embedding caching** — `CachedEmbeddingProvider` wraps Bedrock with DynamoDB cache
    - SHA-256 text hash as key, 7-day TTL, non-fatal cache failures
    - Response includes `cache_hits`/`cache_misses` in metadata
-2. **Document ID in /verify** — pass `document_ids` instead of raw text
-   - Resolves content from `TruthLayerDocuments`, merges with inline sources
-3. **Rate limiting** — `usage_count >= rate_limit` returns 429 with `Retry-After`
-   - Atomic DynamoDB UpdateItem increment on every valid request
-4. **3 integration demos** — `examples/` directory
-5. **Python SDK** — `verify(document_ids=...)`, `upload_document()`, `delete_document()`
-6. **32 tests passing** — full regression suite
+3. **Entity checker** — Catches numerical, negation, and superlative contradictions
+4. **Document ID in /verify** — pass `document_ids` instead of raw text
+5. **Rate limiting** — `usage_count >= rate_limit` returns 429 with `Retry-After`
+6. **3 integration demos** — `examples/` directory
+7. **Python SDK** — `verify(document_ids=...)`, `upload_document()`, `delete_document()`
+8. **87 tests passing** — comprehensive regression suite
+9. **Premium dashboard** — 12-section landing page with live demo, architecture, pricing
 
 ---
 

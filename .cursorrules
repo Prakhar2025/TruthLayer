@@ -10,7 +10,7 @@
 - Python 3.9 (Lambda runtime) — all backend code
 - Next.js 16 + TypeScript (dashboard only)
 - AWS SAM (IaC) — template.yaml is the single source of truth
-- pytest (32 unit tests, MockEmbeddingProvider, no AWS needed)
+- pytest (87 unit tests, MockEmbeddingProvider, no AWS needed)
 
 ## Code Conventions — Python
 
@@ -115,7 +115,7 @@ Always use `process.env.NEXT_PUBLIC_API_URL` and `process.env.NEXT_PUBLIC_API_KE
 ## Testing
 - All tests use `MockEmbeddingProvider` — no AWS credentials needed
 - Run: `pytest tests/ -v`
-- 32 tests must pass before any deploy
+- 87 tests must pass before any deploy
 - Test files in `tests/` directory
 
 ## What NOT to do

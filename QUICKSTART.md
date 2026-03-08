@@ -119,7 +119,7 @@ python main.py
 ## Run Tests
 
 ```bash
-# Run all 25 unit tests
+# Run all 87 unit tests
 pytest tests/ -v
 
 # Run with coverage

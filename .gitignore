@@ -44,3 +44,12 @@ layer/python/
 
 # Benchmark results (environment-specific, not committed)
 benchmarks/results/*.json
+
+# Stale / temporary files
+.txt
+IMPLEMENTATION_SUMMARY.md
+verification_result.json
+tmp_key.txt
+
+# Dashboard environment
+dashboard/.env.local

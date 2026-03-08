@@ -17,13 +17,16 @@ import re
 from typing import Set
 
 
-# ─── Penalty Factors ─────────────────────────────────────────────────────────
-# Applied multiplicatively to the similarity score when contradictions found.
-# Lower penalty = stronger downgrade.
+# ─── Alignment Factors ───────────────────────────────────────────────────────
+# Applied multiplicatively to the similarity score.
+# > 1.0 = alignment confirmed (evidence numbers/facts match)
+# = 1.0 = neutral (nothing to compare)
+# < 1.0 = contradiction detected (evidence of mismatch)
 
-NUMBER_MISMATCH_PENALTY = 0.5    # Claim has numbers not found in source
-NEGATION_MISMATCH_PENALTY = 0.6  # One text negated, other isn't
-SUPERLATIVE_VS_SPECIFIC = 0.6    # "unlimited" vs a specific number
+NUMBER_ALIGNMENT_BOOST = 1.25       # Claim numbers ALL found in source
+NUMBER_MISMATCH_PENALTY = 0.5       # Claim has numbers NOT in source
+NEGATION_MISMATCH_PENALTY = 0.6     # One text negated, other isn't
+SUPERLATIVE_VS_SPECIFIC = 0.6       # "unlimited" vs a specific number
 
 
 # ─── Number Extraction ───────────────────────────────────────────────────────
@@ -84,52 +87,50 @@ def has_superlative(text: str) -> bool:
 
 def compute_alignment_penalty(claim: str, matched_source: str) -> float:
     """
-    Compute a penalty factor based on factual alignment between claim
-    and its best-matched source fragment.
+    Compute bidirectional alignment factor between claim and source.
+
+    This is the key innovation: alignment is a TWO-WAY signal.
+      - Numbers MATCH source → BOOST (positive evidence of support)
+      - Numbers DON'T match → PENALTY (evidence of fabrication)
+      - No numbers to compare → NEUTRAL (rely on embedding alone)
 
     Args:
         claim:          The AI-generated claim text.
-        matched_source: The best-matching source fragment (from similarity).
+        matched_source: The best-matching source fragment.
 
     Returns:
-        Float between 0.0 and 1.0:
-          - 1.0 = no contradictions detected (similarity unchanged)
-          - <1.0 = contradiction found (similarity will be reduced)
-
-    Examples:
-        ("$29/month", "costs $29 per month")        → 1.0 (numbers match)
-        ("$19/month", "costs $29 per month")        → 0.5 (number mismatch)
-        ("99.99% uptime", "guarantees 99.9% uptime")→ 0.5 (number mismatch)
-        ("free shipping", "customer's responsibility")→ 0.6 (superlative)
-        ("no free trial", "includes a 14-day trial")→ 0.6 (negation mismatch)
+        Multiplicative factor:
+          - >1.0 = confirmed alignment (boost similarity)
+          -  1.0 = neutral (no entity-level signal)
+          - <1.0 = contradiction detected (reduce similarity)
     """
     if not matched_source:
         return 1.0
 
-    penalty = 1.0
+    factor = 1.0
 
-    # ── Check 1: Number mismatch ──────────────────────────────────────────
-    # If the claim introduces numbers not found in the matched source,
-    # it's likely fabricating specific values.
+    # ── Check 1: Number alignment (bidirectional) ─────────────────────────
     claim_nums = extract_numbers(claim)
     source_nums = extract_numbers(matched_source)
 
     if claim_nums:
         unmatched = claim_nums - source_nums
-        if unmatched:
-            penalty = min(penalty, NUMBER_MISMATCH_PENALTY)
+        if not unmatched:
+            # ALL claim numbers found in source → strong alignment signal
+            factor = max(factor, NUMBER_ALIGNMENT_BOOST)
+        else:
+            # Claim introduces numbers not in source → contradiction
+            factor = min(factor, NUMBER_MISMATCH_PENALTY)
 
     # ── Check 2: Negation mismatch ────────────────────────────────────────
-    # "non-refundable" (source) vs "refundable" (claim) or vice versa.
     claim_negated = has_negation(claim)
     source_negated = has_negation(matched_source)
 
     if claim_negated != source_negated:
-        penalty = min(penalty, NEGATION_MISMATCH_PENALTY)
+        factor = min(factor, NEGATION_MISMATCH_PENALTY)
 
     # ── Check 3: Superlative vs specific value ────────────────────────────
-    # Claim says "unlimited" but source gives a specific number.
     if has_superlative(claim) and source_nums:
-        penalty = min(penalty, SUPERLATIVE_VS_SPECIFIC)
+        factor = min(factor, SUPERLATIVE_VS_SPECIFIC)
 
-    return penalty
+    return factor

@@ -53,4 +53,4 @@ class ConfidenceScorer:
         Returns:
             Confidence as percentage (0-100)
         """
-        return round(similarity_score * 100, 2)
+        return min(round(similarity_score * 100, 2), 100.0)

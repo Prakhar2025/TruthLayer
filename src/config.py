@@ -19,7 +19,7 @@ import os
 #
 # These thresholds can be overridden via environment variables.
 VERIFIED_THRESHOLD = float(os.environ.get("VERIFIED_THRESHOLD", "0.65"))
-UNCERTAIN_THRESHOLD = float(os.environ.get("UNCERTAIN_THRESHOLD", "0.40"))
+UNCERTAIN_THRESHOLD = float(os.environ.get("UNCERTAIN_THRESHOLD", "0.30"))
 
 # ---------- AWS Bedrock Settings ----------
 BEDROCK_MODEL_ID = os.environ.get(

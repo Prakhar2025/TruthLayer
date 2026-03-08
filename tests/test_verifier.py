@@ -145,12 +145,12 @@ class TestConfidenceScorer:
     
     def test_classify_uncertain(self):
         scorer = ConfidenceScorer()
-        assert scorer.classify_claim(0.50) == "UNCERTAIN"
-        assert scorer.classify_claim(0.30) == "UNCERTAIN"
+        assert scorer.classify_claim(0.55) == "UNCERTAIN"
+        assert scorer.classify_claim(0.40) == "UNCERTAIN"
     
     def test_classify_unsupported(self):
         scorer = ConfidenceScorer()
-        assert scorer.classify_claim(0.25) == "UNSUPPORTED"
+        assert scorer.classify_claim(0.35) == "UNSUPPORTED"
         assert scorer.classify_claim(0.10) == "UNSUPPORTED"
     
     def test_get_confidence_percentage(self):

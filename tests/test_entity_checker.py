@@ -6,7 +6,6 @@ from src.verifier.entity_checker import (
     extract_numbers,
     has_negation,
     has_superlative,
-    NUMBER_ALIGNMENT_BOOST,
     NUMBER_MISMATCH_PENALTY,
     NEGATION_MISMATCH_PENALTY,
     SUPERLATIVE_VS_SPECIFIC,
@@ -81,12 +80,12 @@ class TestComputeAlignmentPenalty:
     """Tests for the main alignment penalty function."""
 
     def test_matching_numbers(self):
-        """Aligned numbers → boost."""
+        """Aligned numbers → no penalty."""
         penalty = compute_alignment_penalty(
             "costs $29 per month",
             "The Starter plan costs $29 per month"
         )
-        assert penalty == NUMBER_ALIGNMENT_BOOST
+        assert penalty == 1.0
 
     def test_mismatched_numbers(self):
         """Wrong numbers → NUMBER_MISMATCH_PENALTY."""
@@ -131,12 +130,12 @@ class TestComputeAlignmentPenalty:
         assert penalty <= 1.0
 
     def test_no_contradiction(self):
-        """Numbers match exactly → boost."""
+        """Perfectly aligned → 1.0."""
         penalty = compute_alignment_penalty(
             "Refunds are processed within 5-7 business days",
             "Refunds are processed within 5-7 business days"
         )
-        assert penalty == NUMBER_ALIGNMENT_BOOST
+        assert penalty == 1.0
 
     def test_empty_source(self):
         """No source → no penalty (nothing to contradict)."""

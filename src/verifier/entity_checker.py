@@ -17,13 +17,11 @@ import re
 from typing import Set
 
 
-# ─── Alignment Factors ───────────────────────────────────────────────────────
+# ─── Penalty Factors ─────────────────────────────────────────────────────────
 # Applied multiplicatively to the similarity score.
-# > 1.0 = alignment confirmed (evidence numbers/facts match)
-# = 1.0 = neutral (nothing to compare)
-# < 1.0 = contradiction detected (evidence of mismatch)
+# = 1.0 = neutral (no contradiction detected)
+# < 1.0 = contradiction detected (reduce similarity)
 
-NUMBER_ALIGNMENT_BOOST = 1.25       # Claim numbers ALL found in source
 NUMBER_MISMATCH_PENALTY = 0.5       # Claim has numbers NOT in source
 NEGATION_MISMATCH_PENALTY = 0.6     # One text negated, other isn't
 SUPERLATIVE_VS_SPECIFIC = 0.6       # "unlimited" vs a specific number
@@ -87,50 +85,46 @@ def has_superlative(text: str) -> bool:
 
 def compute_alignment_penalty(claim: str, matched_source: str) -> float:
     """
-    Compute bidirectional alignment factor between claim and source.
+    Compute penalty factor based on factual alignment between claim and source.
 
-    This is the key innovation: alignment is a TWO-WAY signal.
-      - Numbers MATCH source → BOOST (positive evidence of support)
-      - Numbers DON'T match → PENALTY (evidence of fabrication)
-      - No numbers to compare → NEUTRAL (rely on embedding alone)
+    Detects contradictions that embeddings fundamentally cannot catch:
+      - Numerical mismatches ($29 vs $19, 99.9% vs 99.99%)
+      - Negation differences (non-refundable vs refundable)
+      - Superlative vs specific value (unlimited vs 100,000)
 
     Args:
         claim:          The AI-generated claim text.
         matched_source: The best-matching source fragment.
 
     Returns:
-        Multiplicative factor:
-          - >1.0 = confirmed alignment (boost similarity)
-          -  1.0 = neutral (no entity-level signal)
-          - <1.0 = contradiction detected (reduce similarity)
+        Float between 0.0 and 1.0:
+          - 1.0 = no contradiction detected (similarity unchanged)
+          - <1.0 = contradiction found (similarity reduced)
     """
     if not matched_source:
         return 1.0
 
-    factor = 1.0
+    penalty = 1.0
 
-    # ── Check 1: Number alignment (bidirectional) ─────────────────────────
+    # ── Check 1: Number mismatch ──────────────────────────────────────────
     claim_nums = extract_numbers(claim)
     source_nums = extract_numbers(matched_source)
 
     if claim_nums:
         unmatched = claim_nums - source_nums
-        if not unmatched:
-            # ALL claim numbers found in source → strong alignment signal
-            factor = max(factor, NUMBER_ALIGNMENT_BOOST)
-        else:
+        if unmatched:
             # Claim introduces numbers not in source → contradiction
-            factor = min(factor, NUMBER_MISMATCH_PENALTY)
+            penalty = min(penalty, NUMBER_MISMATCH_PENALTY)
 
     # ── Check 2: Negation mismatch ────────────────────────────────────────
     claim_negated = has_negation(claim)
     source_negated = has_negation(matched_source)
 
     if claim_negated != source_negated:
-        factor = min(factor, NEGATION_MISMATCH_PENALTY)
+        penalty = min(penalty, NEGATION_MISMATCH_PENALTY)
 
     # ── Check 3: Superlative vs specific value ────────────────────────────
     if has_superlative(claim) and source_nums:
-        factor = min(factor, SUPERLATIVE_VS_SPECIFIC)
+        penalty = min(penalty, SUPERLATIVE_VS_SPECIFIC)
 
-    return factor
+    return penalty

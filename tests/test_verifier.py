@@ -141,17 +141,17 @@ class TestConfidenceScorer:
     def test_classify_verified(self):
         scorer = ConfidenceScorer()
         assert scorer.classify_claim(0.85) == "VERIFIED"
-        assert scorer.classify_claim(0.80) == "VERIFIED"
+        assert scorer.classify_claim(0.60) == "VERIFIED"
     
     def test_classify_uncertain(self):
         scorer = ConfidenceScorer()
-        assert scorer.classify_claim(0.70) == "UNCERTAIN"
-        assert scorer.classify_claim(0.55) == "UNCERTAIN"
+        assert scorer.classify_claim(0.50) == "UNCERTAIN"
+        assert scorer.classify_claim(0.35) == "UNCERTAIN"
     
     def test_classify_unsupported(self):
         scorer = ConfidenceScorer()
-        assert scorer.classify_claim(0.50) == "UNSUPPORTED"
-        assert scorer.classify_claim(0.20) == "UNSUPPORTED"
+        assert scorer.classify_claim(0.30) == "UNSUPPORTED"
+        assert scorer.classify_claim(0.10) == "UNSUPPORTED"
     
     def test_get_confidence_percentage(self):
         scorer = ConfidenceScorer()

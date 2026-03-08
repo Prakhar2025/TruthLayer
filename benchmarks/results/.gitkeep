@@ -1,0 +1,7 @@
+Benchmark results are saved here as JSON files.
+
+Format: results_YYYYMMDD_HHMMSS.json
+
+These files are gitignored — they contain timing data specific to your environment
+and should not be committed. Reference the README.md for sample output and
+methodology explanation.

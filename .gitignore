@@ -41,3 +41,6 @@ verification_result.json
 # AWS SAM
 .aws-sam/
 layer/python/
+
+# Benchmark results (environment-specific, not committed)
+benchmarks/results/*.json

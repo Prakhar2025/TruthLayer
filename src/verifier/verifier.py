@@ -8,6 +8,7 @@ from src.embeddings.base import EmbeddingProvider
 from src.verifier.claim_extractor import ClaimExtractor
 from src.verifier.similarity_engine import SimilarityEngine
 from src.verifier.confidence_scorer import ConfidenceScorer
+from src.verifier.entity_checker import compute_alignment_penalty
 from src.utils.text_splitter import chunk_text
 
 logger = logging.getLogger(__name__)
@@ -136,22 +137,30 @@ class TruthLayerVerifier:
         summary = {"verified": 0, "uncertain": 0, "unsupported": 0}
 
         for claim, claim_emb in zip(claims, claim_embeddings):
-            # Find best matching source
+            # Find best matching source (semantic similarity)
             similarity, matched_source = self.similarity_engine.find_best_match(
                 claim_emb,
                 source_embeddings_list,
                 source_chunks
             )
 
-            # Classify and score
-            status = self.confidence_scorer.classify_claim(similarity)
-            confidence = self.confidence_scorer.get_confidence_percentage(similarity)
+            # Apply entity contradiction check (catches what embeddings miss).
+            # Numbers, negations, and superlatives are compared literally.
+            # A penalty < 1.0 means a contradiction was detected.
+            alignment = compute_alignment_penalty(claim, matched_source)
+            adjusted_similarity = similarity * alignment
+
+            # Classify using the adjusted score
+            status = self.confidence_scorer.classify_claim(adjusted_similarity)
+            confidence = self.confidence_scorer.get_confidence_percentage(
+                adjusted_similarity
+            )
 
             verified_claims.append({
                 "text": claim,
                 "status": status,
                 "confidence": confidence,
-                "similarity_score": round(similarity, 4),
+                "similarity_score": round(adjusted_similarity, 4),
                 "matched_source": matched_source[:200] if matched_source else ""
             })
 

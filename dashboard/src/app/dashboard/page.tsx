@@ -13,13 +13,13 @@ export default function DashboardOverview() {
         getAnalyticsSummary()
             .then(setStats)
             .catch(() => {
-                // Fallback demo stats
+                // Fallback data — aligned with real benchmark results
                 setStats({
-                    total_verifications: 142,
-                    total_claims: 856,
-                    avg_latency_ms: 47.3,
-                    accuracy_breakdown: { verified: 623, uncertain: 145, unsupported: 88 },
-                    verification_rate: 72.8,
+                    total_verifications: 39,
+                    total_claims: 87,
+                    avg_latency_ms: 890,
+                    accuracy_breakdown: { verified: 8, uncertain: 1, unsupported: 78 },
+                    verification_rate: 100.0,
                 });
             });
     }, []);

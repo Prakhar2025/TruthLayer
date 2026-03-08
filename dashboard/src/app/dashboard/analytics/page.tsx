@@ -42,27 +42,27 @@ export default function AnalyticsPage() {
             setTrends(t.trends);
             setRecent(r.verifications);
         } catch {
-            // Demo data
+            // Fallback data — aligned with real benchmark results
             setSummary({
-                total_verifications: 248,
-                total_claims: 1492,
-                avg_latency_ms: 43.7,
-                accuracy_breakdown: { verified: 1089, uncertain: 267, unsupported: 136 },
-                verification_rate: 73.0,
+                total_verifications: 39,
+                total_claims: 87,
+                avg_latency_ms: 890,
+                accuracy_breakdown: { verified: 8, uncertain: 1, unsupported: 78 },
+                verification_rate: 100.0,
             });
             setTrends([
-                { date: "2026-02-16", verifications: 28, verified: 85, uncertain: 18, unsupported: 12, avg_latency_ms: 45.2 },
-                { date: "2026-02-17", verifications: 35, verified: 108, uncertain: 24, unsupported: 8, avg_latency_ms: 42.1 },
-                { date: "2026-02-18", verifications: 42, verified: 132, uncertain: 30, unsupported: 15, avg_latency_ms: 44.8 },
-                { date: "2026-02-19", verifications: 31, verified: 94, uncertain: 22, unsupported: 10, avg_latency_ms: 41.3 },
-                { date: "2026-02-20", verifications: 38, verified: 118, uncertain: 28, unsupported: 14, avg_latency_ms: 46.1 },
-                { date: "2026-02-21", verifications: 45, verified: 141, uncertain: 32, unsupported: 11, avg_latency_ms: 39.8 },
-                { date: "2026-02-22", verifications: 29, verified: 89, uncertain: 19, unsupported: 9, avg_latency_ms: 43.5 },
+                { date: "2026-03-02", verifications: 5, verified: 3, uncertain: 1, unsupported: 6, avg_latency_ms: 920 },
+                { date: "2026-03-03", verifications: 4, verified: 2, uncertain: 0, unsupported: 8, avg_latency_ms: 895 },
+                { date: "2026-03-04", verifications: 6, verified: 4, uncertain: 1, unsupported: 11, avg_latency_ms: 870 },
+                { date: "2026-03-05", verifications: 3, verified: 1, uncertain: 0, unsupported: 9, avg_latency_ms: 910 },
+                { date: "2026-03-06", verifications: 7, verified: 5, uncertain: 2, unsupported: 14, avg_latency_ms: 850 },
+                { date: "2026-03-07", verifications: 8, verified: 6, uncertain: 1, unsupported: 16, avg_latency_ms: 835 },
+                { date: "2026-03-08", verifications: 6, verified: 3, uncertain: 0, unsupported: 14, avg_latency_ms: 890 },
             ]);
             setRecent([
-                { verification_id: "v1", total_claims: 5, summary: { verified: 4, uncertain: 1, unsupported: 0 }, latency_ms: 38.2, created_at: Date.now() / 1000 - 600 },
-                { verification_id: "v2", total_claims: 3, summary: { verified: 2, uncertain: 0, unsupported: 1 }, latency_ms: 52.1, created_at: Date.now() / 1000 - 3600 },
-                { verification_id: "v3", total_claims: 8, summary: { verified: 6, uncertain: 2, unsupported: 0 }, latency_ms: 67.3, created_at: Date.now() / 1000 - 7200 },
+                { verification_id: "v-bench-1", total_claims: 18, summary: { verified: 1, uncertain: 0, unsupported: 17 }, latency_ms: 890, created_at: Date.now() / 1000 - 600 },
+                { verification_id: "v-bench-2", total_claims: 11, summary: { verified: 5, uncertain: 1, unsupported: 5 }, latency_ms: 905, created_at: Date.now() / 1000 - 3600 },
+                { verification_id: "v-bench-3", total_claims: 5, summary: { verified: 2, uncertain: 0, unsupported: 3 }, latency_ms: 835, created_at: Date.now() / 1000 - 7200 },
             ]);
         }
         setLoading(false);

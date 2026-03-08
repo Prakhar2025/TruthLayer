@@ -113,6 +113,23 @@ export default function DocumentsPage() {
                 </button>
             </div>
 
+            {/* Info banner */}
+            <div
+                style={{
+                    background: "rgba(99, 102, 241, 0.06)",
+                    border: "1px solid rgba(99, 102, 241, 0.15)",
+                    borderRadius: 12,
+                    padding: "12px 18px",
+                    marginBottom: 20,
+                    fontSize: "0.82rem",
+                    color: "var(--color-text-secondary)",
+                    lineHeight: 1.6,
+                }}
+            >
+                📚 <strong style={{ color: "var(--color-text-primary)" }}>Source Documents</strong> are the ground truth that AI responses are verified against.
+                Upload your company policies, product docs, or any reference material here. When you verify an AI response, TruthLayer checks claims against these documents.
+            </div>
+
             {/* Upload Form */}
             {showUpload && (
                 <motion.div

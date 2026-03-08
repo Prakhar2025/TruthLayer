@@ -71,7 +71,7 @@ async function apiCall<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_URL}${endpoint}`;
-  
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(API_KEY && { 'x-api-key': API_KEY }),
@@ -157,6 +157,36 @@ export async function checkHealth(): Promise<{
   return apiCall('/health');
 }
 
+// ---- API Keys ----
+interface GenerateKeyResponse {
+  api_key: string;
+  owner: string;
+  permissions: string[];
+  rate_limit: number;
+  message: string;
+}
+
+export async function generateApiKey(
+  owner: string,
+  email: string,
+  useCase?: string,
+): Promise<GenerateKeyResponse> {
+  // Note: this endpoint does NOT require an existing x-api-key header.
+  // We call the API directly without the shared API_KEY.
+  const url = `${API_URL}/keys`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, email, use_case: useCase || '' }),
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.message || `API error: ${response.status}`);
+  }
+  return data as GenerateKeyResponse;
+}
+
 // ---- Types re-export ----
 export type {
   Claim,
@@ -165,4 +195,5 @@ export type {
   Document,
   AnalyticsSummary,
   TrendData,
+  GenerateKeyResponse,
 };

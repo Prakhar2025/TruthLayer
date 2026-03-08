@@ -180,6 +180,33 @@ Resources:
             Method: GET
             RestApiId: !Ref TruthLayerApi
 
+  KeysFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: truthlayer-keys
+      Handler: handler.handler
+      CodeUri: lambda/keys/
+      Layers:
+        - !Ref TruthLayerSharedLayer
+      MemorySize: 256
+      Timeout: 10
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ApiKeysTable
+      Events:
+        KeysPost:
+          Type: Api
+          Properties:
+            Path: /keys
+            Method: POST
+            RestApiId: !Ref TruthLayerApi
+        KeysOptions:
+          Type: Api
+          Properties:
+            Path: /keys
+            Method: OPTIONS
+            RestApiId: !Ref TruthLayerApi
+
   # ============================
   # API Gateway
   # ============================

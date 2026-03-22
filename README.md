@@ -4,7 +4,7 @@
   <img src="https://img.shields.io/badge/Precision-100%25-6366F1?style=for-the-badge" alt="Precision"/>
   <img src="https://img.shields.io/badge/Tests-87_Passing-22C55E?style=for-the-badge" alt="Tests"/>
   <img src="https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python" alt="Python"/>
-  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" alt="License"/>
+  <img src="https://img.shields.io/badge/License-Copyright-blue?style=for-the-badge" alt="License"/>
 </p>
 
 # 🛡️ TruthLayer
@@ -278,7 +278,8 @@ pytest tests/ --cov=src
 
 ## 📜 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+**© 2026 Prakhar Shukla. All Rights Reserved.**
+This code is provided for portfolio review purposes only. See [LICENSE](LICENSE) for details.
 
 ---
 

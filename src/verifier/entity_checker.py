@@ -388,6 +388,251 @@ def has_negation(text: str) -> bool:
     return bool(_NEGATION_RE.search(text))
 
 
+# ─── S2A vicinity guard ────────────────────────────────────────────────────────
+#
+# Root-cause of the bulk FN population (34/35 cases):
+#
+#   has_negation(claim) != has_negation(source) fires whenever ONE sentence
+#   contains ANY negation marker while the other does not.  This is too blunt:
+#   faithful sentence pairs routinely express the same restriction using
+#   complementary linguistic polarity:
+#
+#     "must remain below 250 mg/dL"          (no negation word)
+#     "must not exceed 250 mg/dL"            (has: "not")
+#     → SAME upper-bound constraint, different syntactic polarity.
+#
+#     "Transfer requires written authorization"  (no negation)
+#     "Transfer is not permitted without authorization" (has: "not", "without")
+#     → SAME prohibition, different syntactic form.
+#
+# The guard works in two stages:
+#
+#   Stage 1 — Threshold equivalence abort
+#     Detect sentences that both express an upper-bound (or lower-bound)
+#     constraint using complementary polarity operators:
+#       upper-bound positive : below, under, at most, less than, …
+#       upper-bound negative : not exceed, not above, not surpass, …
+#     If both sentences describe the SAME bound direction AND share a numeric
+#     value, they are mathematically equivalent → abort S2A.
+#
+#   Stage 2 — Shared-anchor vicinity check
+#     Extract the content words within WINDOW positions of every negation
+#     marker in each sentence (the "negation window").  Only fire S2A when
+#     the negation window of the sentence that HAS negation overlaps with
+#     significant content words from the sentence that does NOT have negation.
+#     If there is no overlap the negation is structural (e.g. "not exceed")
+#     and does not invert a shared predicate.
+
+_UPPER_BOUND_POS_RE = re.compile(
+    r"\b(below|under|at\s+most|no\s+more\s+than|less\s+than"
+    r"|not\s+exceeding|not\s+above|beneath"
+    r"|time(?:s)?\s+out\s+after|expires?\s+after|within\s+\d)\b",
+    re.IGNORECASE,
+)
+_UPPER_BOUND_NEG_RE = re.compile(
+    r"\b(not\s+exceed(?:ing)?|must\s+not\s+exceed"
+    r"|shall\s+not\s+exceed|not\s+(?:go\s+)?above"
+    r"|not\s+surpass(?:ing)?|not\s+(?:go\s+)?over)\b",
+    re.IGNORECASE,
+)
+_LOWER_BOUND_POS_RE = re.compile(
+    r"\b(above|over|at\s+least|no\s+less\s+than"
+    r"|more\s+than|greater\s+than|exceed(?:ing)?|a\s+minimum\s+of)\b",
+    re.IGNORECASE,
+)
+_LOWER_BOUND_NEG_RE = re.compile(
+    r"\b(not\s+below|not\s+(?:less|fewer)\s+than"
+    r"|not\s+(?:fall|drop)\s+below|no\s+fewer\s+than)\b",
+    re.IGNORECASE,
+)
+
+# Soft negation words that appear in structural expressions ("not exceed",
+# "without which") — their negation windows should be checked, not assumed.
+# NOTE: "without" is intentionally excluded.  In requirement contexts,
+# "without" is a CONDITIONAL PREPOSITION ("not permitted without X" means
+# "X is required"), not a negation of the following word.  Including it
+# would cause "without authorization" to anchor on "authorization", making
+# the guard fire for faithful pairs like
+#   "requires authorization" ↔ "not permitted without authorization".
+_SOFT_NEG_WORDS: frozenset = frozenset({
+    "not", "no", "never", "none", "cannot", "cant",
+    "dont", "doesnt", "wont", "isnt", "arent", "shouldnt",
+})
+
+# Minimum content-word length to be considered a meaningful anchor.
+_ANCHOR_MIN_LEN: int = 4
+
+# Common stopwords excluded from anchor comparison.
+# Intentionally includes high-frequency TOPIC words that are shared between
+# claim and source sentences simply because they are the subject of the
+# sentence — not because the negation is targeting them as a predicate.
+# Including these words in the anchor set creates false Stage-2 fires:
+#   "not permitted for all employees" vs "prohibited for all employees"
+#     → "employees" is the scope qualifier, not the negated predicate.
+_STOPWORDS: frozenset = frozenset({
+    # Grammatical stopwords
+    "this", "that", "with", "from", "have", "been", "will", "were",
+    "they", "them", "their", "there", "these", "those", "which",
+    "when", "then", "than", "also", "must", "shall", "should",
+    "would", "could", "might", "about", "into", "onto", "under",
+    "above", "below", "after", "before", "during", "through",
+    "between", "within", "each", "every", "some", "such", "same",
+    "only", "just", "more", "most", "less", "least", "very",
+    "area", "used", "been", "make", "made", "take", "taken",
+    # High-frequency TOPIC/ENTITY words — not semantic predicates.
+    # Shared between faithful pairs because they name the SUBJECT, not the
+    # predicate the negation is inverting.
+    "employees", "users", "staff", "personnel", "members", "workers",
+    "system", "systems", "response", "request", "requests",
+    "data", "files", "records", "information", "content",
+    "access", "standard", "permitted", "allowed", "required",
+    "network", "device", "devices", "service", "services",
+    "process", "account", "accounts", "document", "documents",
+})
+
+
+def _content_tokens(text: str) -> frozenset:
+    """Extract alphabetic content words of length >= _ANCHOR_MIN_LEN."""
+    return frozenset(
+        w for w in re.findall(r"[a-z]+", text.lower())
+        if len(w) >= _ANCHOR_MIN_LEN and w not in _STOPWORDS
+    )
+
+
+def _neg_window_tokens(text: str, window: int = 4) -> frozenset:
+    """
+    Return the set of content words that appear within `window` positions
+    AFTER any negation marker in the text.
+
+    These are the words the negation is most likely modifying syntactically.
+    If the window contains no significant content words, the negation is
+    probably at sentence-end or in a structural position ("not exceed").
+    """
+    words = re.findall(r"[\w'-]+", text.lower())
+    anchors: Set[str] = set()
+    for i, word in enumerate(words):
+        stripped = word.strip("'-")
+        if stripped in _SOFT_NEG_WORDS or stripped.startswith("non"):
+            # Collect content words in the window *after* the negation marker.
+            for j in range(i + 1, min(len(words), i + window + 1)):
+                candidate = words[j].strip("'-.,:")
+                if (
+                    len(candidate) >= _ANCHOR_MIN_LEN
+                    and candidate not in _STOPWORDS
+                    and candidate.isalpha()
+                ):
+                    anchors.add(candidate)
+    return frozenset(anchors)
+
+
+def _s2a_is_genuine_contradiction(claim: str, source: str) -> bool:
+    """
+    Return True only when the negation polarity difference between claim and
+    source represents a genuine semantic contradiction — i.e., one sentence
+    negates a predicate that the other sentence affirms.
+
+    Returns False (abort S2A) in two cases:
+
+    Case 1 — Threshold equivalence:
+        Both sentences bound the same quantity in the same direction using
+        complementary polarity operators, e.g.:
+          "must remain below 250 mg/dL"  ↔  "must not exceed 250 mg/dL"
+          "at least 12 months"           ↔  "not less than 12 months"
+        Detection: (claim_upper and source_upper) or (claim_lower and source_lower),
+        AND they share at least one numeric value.
+
+    Case 2 — Non-overlapping negation window:
+        The content words inside the negation window of the negative sentence
+        do not overlap with significant content words of the positive sentence.
+        If there is no shared anchor the polarity difference is structural
+        (e.g., "not exceed" vs "below") and does not invert a shared predicate.
+
+    Args:
+        claim, source: The two sentence strings after has_negation polarity
+                       mismatch has already been confirmed by the caller.
+
+    Returns:
+        True  → genuine contradiction → apply NEGATION_MISMATCH_PENALTY
+        False → structural / equivalent expression → pass through unchanged
+    """
+    claim_l  = claim.lower()
+    source_l = source.lower()
+
+    # ── Stage 1a: Threshold equivalence abort ────────────────────────────────
+    claim_upper  = bool(_UPPER_BOUND_POS_RE.search(claim_l) or _UPPER_BOUND_NEG_RE.search(claim_l))
+    source_upper = bool(_UPPER_BOUND_POS_RE.search(source_l) or _UPPER_BOUND_NEG_RE.search(source_l))
+    claim_lower  = bool(_LOWER_BOUND_POS_RE.search(claim_l) or _LOWER_BOUND_NEG_RE.search(claim_l))
+    source_lower = bool(_LOWER_BOUND_POS_RE.search(source_l) or _LOWER_BOUND_NEG_RE.search(source_l))
+
+    if (claim_upper and source_upper) or (claim_lower and source_lower):
+        shared_nums = _extract_number_unit_pairs(claim) & _extract_number_unit_pairs(source)
+        if shared_nums:
+            return False  # mathematically equivalent threshold — do not fire
+
+    # ── Stage 1b: Requirement-conditional equivalence abort ───────────────────
+    # "X requires Y" ≡ "X is not permitted without Y" — same precondition.
+    # The key linguistic signal: "may not be Z without Y" (multi-word passive)
+    # must match even when "be" sits between "not" and the verb phrase.
+    _REQ_POS = re.compile(
+        r"\b(requires?|is\s+required|mandatory|must\s+(?!not\b)|is\s+needed"
+        r"|need(?:s|ed)\s+to|has\s+to|have\s+to)\b",
+        re.IGNORECASE,
+    )
+    _NEG_COND = re.compile(
+        # Allow multi-word verb phrases between "not" and "without":
+        # "may not be transferred without", "cannot be shared without"
+        r"\b(not\s+permitted\s+without"
+        r"|cannot\s+(?:[\w]+\s+){0,3}without"
+        r"|may\s+not\s+(?:[\w]+\s+){0,3}without"
+        r"|must\s+not\s+be\s+omitted"
+        r"|not\s+allowed\s+without"
+        r"|shall\s+not\s+(?:[\w]+\s+){0,3}without)\b",
+        re.IGNORECASE,
+    )
+    if (bool(_REQ_POS.search(claim_l)) or bool(_REQ_POS.search(source_l))) and \
+       (bool(_NEG_COND.search(claim_l)) or bool(_NEG_COND.search(source_l))):
+        shared_content = _content_tokens(claim_l) & _content_tokens(source_l)
+        if len(shared_content) >= 2:
+            return False  # same precondition, different syntactic form — abort
+
+    # ── Stage 1c: Unconditional-access vs required-gate contradiction ─────────
+    # Pattern: "X is freely/publicly accessible without Y" vs "Y is required"
+    # This is a GENUINE contradiction (one says no gate, other says gate exists)
+    # that Stage 2 misses because "without" is excluded from _SOFT_NEG_WORDS.
+    # Detect via the presence of an access-without pattern paired with required.
+    _ACCESS_WITHOUT = re.compile(
+        r"\b(?:accessible|available|open|public(?:ly)?)\b.*\bwithout\b"
+        r"|\bwithout\b.*\b(?:authentication|authorization|verification|credential)",
+        re.IGNORECASE,
+    )
+    _GATE_REQUIRED = re.compile(
+        r"\b(?:requires?|is\s+required|mandatory|must\s+(?!not\b)|needed)\b",
+        re.IGNORECASE,
+    )
+    if (bool(_ACCESS_WITHOUT.search(claim_l)) and bool(_GATE_REQUIRED.search(source_l))) or \
+       (bool(_ACCESS_WITHOUT.search(source_l)) and bool(_GATE_REQUIRED.search(claim_l))):
+        # Confirm a shared security/gating term exists between the two sentences
+        shared_content = _content_tokens(claim_l) & _content_tokens(source_l)
+        if shared_content:
+            return True  # genuine access-gate contradiction — fire
+
+    # ── Stage 2: Negation-window shared-anchor check ──────────────────────────
+    # Final check: is the negation in the negative sentence directly targeting
+    # a term that the positive sentence uses un-negated?
+    claim_has_neg = has_negation(claim)
+    neg_sentence  = claim_l  if claim_has_neg else source_l
+    pos_sentence  = source_l if claim_has_neg else claim_l
+
+    neg_window  = _neg_window_tokens(neg_sentence)
+    pos_content = _content_tokens(pos_sentence)
+
+    shared_anchors = neg_window & pos_content
+    if not shared_anchors:
+        return False  # negation is structural — do not fire
+
+    return True
+
+
 # Semantic antonym pairs for contradiction detection.
 # Each (a, b) means: if claim contains a and source contains b (or vice versa),
 # the claim is likely contradicting the source.
@@ -545,11 +790,16 @@ def compute_alignment_penalty(claim: str, matched_source: str) -> float:
     if _numbers_contradict(claim, matched_source):
         penalty = min(penalty, NUMBER_MISMATCH_PENALTY)
 
-    # ── Signal 2a: Explicit negation polarity mismatch ────────────────────────
+    # ── Signal 2a: Explicit negation polarity mismatch (vicinity-guarded) ────
+    # The blunt has_negation polarity check is retained as the PRE-FILTER:
+    # if both sentences have the same polarity, skip immediately (cheap O(1)).
+    # Only when polarity differs do we run the O(n) vicinity guard to confirm
+    # the negation actually inverts a shared predicate.
     claim_negated  = has_negation(claim)
     source_negated = has_negation(matched_source)
     if claim_negated != source_negated:
-        penalty = min(penalty, NEGATION_MISMATCH_PENALTY)
+        if _s2a_is_genuine_contradiction(claim, matched_source):
+            penalty = min(penalty, NEGATION_MISMATCH_PENALTY)
 
     # ── Signal 2b: Semantic antonym contradiction ──────────────────────────────
     if _semantic_negation_contradict(claim, matched_source):

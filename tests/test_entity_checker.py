@@ -416,6 +416,120 @@ class TestSemanticNegationAntonyms:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# NEW: S2A Vicinity Guard — precision-safe negation polarity check
+# ══════════════════════════════════════════════════════════════════════════════
+
+from src.verifier.entity_checker import (
+    _extract_superlative_terms,
+    _s2a_is_genuine_contradiction,
+)
+
+
+class TestS2AVicinityGuard:
+    """
+    Validates the surgical S2A vicinity guard that fixes 34/35 FNs caused by
+    the blunt has_negation polarity mismatch.
+
+    Two categories of test:
+      A) ABORT cases — faithful pairs using complementary linguistic polarity
+         _s2a_is_genuine_contradiction must return False (do not penalize)
+      B) FIRE cases  — genuine contradictions
+         _s2a_is_genuine_contradiction must return True (penalize)
+    """
+
+    # ── Category A: Abort (do NOT penalize faithful equivalents) ──────────────
+
+    def test_abort_threshold_upper_bound_equivalent(self):
+        """'below 250 mg/dL' ≡ 'must not exceed 250 mg/dL' → abort S2A."""
+        assert not _s2a_is_genuine_contradiction(
+            "Drug concentration must remain below 250 mg/dL.",
+            "Drug concentration must not exceed 250 mg/dL.",
+        )
+
+    def test_abort_threshold_timeout_equivalent(self):
+        """'times out after 30 seconds' ≡ 'no response for 30 seconds' → abort."""
+        assert not _s2a_is_genuine_contradiction(
+            "Requests time out after 30 seconds with no response.",
+            "The system will not wait more than 30 seconds for a response.",
+        )
+
+    def test_abort_threshold_decibel_equivalent(self):
+        """'must not exceed 55 dB' ≡ 'must remain below 55 dB' → abort."""
+        assert not _s2a_is_genuine_contradiction(
+            "Residential areas must not exceed 55 decibels of noise.",
+            "Noise in residential areas must remain below 55 decibels.",
+        )
+
+    def test_abort_requirement_conditional_equivalent(self):
+        """'requires written authorization' ≡ 'not permitted without authorization' → abort."""
+        assert not _s2a_is_genuine_contradiction(
+            "Transfer of the contract requires written authorization.",
+            "The contract may not be transferred without written authorization.",
+        )
+
+    def test_abort_prohibition_equivalent(self):
+        """'prohibited for all employees' ≡ 'employees must not share' → abort."""
+        assert not _s2a_is_genuine_contradiction(
+            "Sharing login credentials is prohibited for all employees.",
+            "All employees are required to keep their login credentials confidential.",
+        )
+
+    def test_abort_mandatory_phrasing_equivalent(self):
+        """'is mandatory' ≡ 'must not be omitted' → abort."""
+        assert not _s2a_is_genuine_contradiction(
+            "Wearing PPE is mandatory in this area.",
+            "PPE must not be omitted when entering this facility.",
+        )
+
+    def test_abort_penalty_not_applied_for_threshold_equivalent(self):
+        """End-to-end: equivalent threshold pair must NOT reduce the penalty."""
+        penalty = compute_alignment_penalty(
+            "Drug concentration must remain below 250 mg/dL.",
+            "Drug concentration must not exceed 250 mg/dL.",
+        )
+        # Both sentences express identical constraint — penalty should be 1.0
+        assert penalty == 1.0, (
+            f"Expected 1.0 (no penalty) for threshold equivalent pair, got {penalty}"
+        )
+
+    def test_abort_penalty_not_applied_for_requirement_equivalent(self):
+        """End-to-end: requirement-conditional pair must NOT reduce the penalty."""
+        penalty = compute_alignment_penalty(
+            "Transfer of the contract requires written authorization.",
+            "The contract may not be transferred without written authorization.",
+        )
+        assert penalty == 1.0, (
+            f"Expected 1.0 for requirement-conditional equivalent, got {penalty}"
+        )
+
+    # ── Category B: Fire (MUST penalize genuine contradictions) ───────────────
+
+    def test_fire_genuine_access_contradiction(self):
+        """'publicly accessible without auth' contradicts 'requires auth' → fire."""
+        assert _s2a_is_genuine_contradiction(
+            "The API endpoint is publicly accessible without authentication.",
+            "Authentication is required to access this API endpoint.",
+        )
+
+    def test_fire_genuine_authorization_contradiction(self):
+        """claim says authorized, source says unauthorized → fire."""
+        assert _s2a_is_genuine_contradiction(
+            "The system is authorized for production deployment.",
+            "The system is not authorized for deployment in production environments.",
+        )
+
+    def test_fire_genuine_penalty_applied_for_access_contradiction(self):
+        """End-to-end: genuine access contradiction must still apply the penalty."""
+        penalty = compute_alignment_penalty(
+            "Remote access is permitted for all employees.",
+            "Remote access is not permitted for standard employees.",
+        )
+        assert penalty <= NEGATION_MISMATCH_PENALTY, (
+            f"Expected penalty <= {NEGATION_MISMATCH_PENALTY} for genuine contradiction, got {penalty}"
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # NEW: Hyphenated compound superlative matching (Fix 2 — regex boundary)
 # ══════════════════════════════════════════════════════════════════════════════
 

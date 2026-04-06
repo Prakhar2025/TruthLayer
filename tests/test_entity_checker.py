@@ -413,3 +413,88 @@ class TestSemanticNegationAntonyms:
             "The export of this technology is prohibited without a federal license."
         )
         assert penalty <= NEGATION_MISMATCH_PENALTY
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: Hyphenated compound superlative matching (Fix 2 — regex boundary)
+# ══════════════════════════════════════════════════════════════════════════════
+
+from src.verifier.entity_checker import _extract_superlative_terms
+
+
+class TestHyphenatedSuperlativeDetection:
+    """
+    The lookahead in _extract_superlative_terms was previously '(?![a-z-])'
+    which blocked matching 'shortest' inside 'shortest-lasting' because the
+    character following 'shortest' is '-'.
+
+    Fix 2 relaxes the lookahead to '(?![a-z])' so the root term is extracted
+    even when it is the prefix of a hyphenated compound.
+    """
+
+    def test_shortest_hyphenated_compound_extracted(self):
+        """'shortest-lasting' must yield 'shortest' as a superlative term."""
+        terms = _extract_superlative_terms(
+            "The medication provides the shortest-lasting relief in the category."
+        )
+        assert "shortest" in terms, (
+            "'shortest' must be extracted from the compound 'shortest-lasting'"
+        )
+
+    def test_longest_running_extracted(self):
+        """'longest-running' must yield 'longest'."""
+        terms = _extract_superlative_terms(
+            "This is the longest-running open-source project in the Apache Foundation."
+        )
+        assert "longest" in terms
+
+    def test_shortest_vs_longest_contradiction_detected(self):
+        """End-to-end: 'shortest-lasting' vs 'longest-lasting' is a superlative contradiction."""
+        assert _superlatives_contradict(
+            "The medication provides the shortest-lasting relief in this category.",
+            "The medication provides the longest-lasting relief in this category."
+        )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: Enterprise tier-name contradiction pairs (Fix 3)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestTierNameContradictions:
+    """
+    Cases where the adversarial hallucination swaps a plan tier name rather
+    than an explicit superlative word.  'entry-level' and 'enterprise' are
+    polar opposites in any SLA or feature-set context.
+
+    These pairs correspond to adversarial benchmark cases [258] and [274]
+    which previously escaped detection.
+    """
+
+    def test_entry_level_vs_enterprise(self):
+        """'entry-level' and 'enterprise' are antonymic tier names."""
+        assert _superlatives_contradict(
+            "The entry-level plan includes the highest number of custom integrations.",
+            "The enterprise plan includes the highest number of custom integrations."
+        )
+
+    def test_newly_onboarded_vs_long_term(self):
+        """'newly onboarded' and 'long-term' are antonymic tenure descriptors."""
+        assert _superlatives_contradict(
+            "Newly onboarded accounts receive the most favorable contract terms.",
+            "Long-term accounts receive the most favorable contract terms."
+        )
+
+    def test_basic_vs_enterprise(self):
+        """'basic' plan and 'enterprise' plan are polar opposites."""
+        assert _superlatives_contradict(
+            "The basic tier offers enterprise-grade SLA guarantees.",
+            "The enterprise tier offers enterprise-grade SLA guarantees."
+        )
+
+    def test_tier_swap_applies_penalty(self):
+        """End-to-end: tier name swap must reduce the alignment penalty."""
+        penalty = compute_alignment_penalty(
+            "The entry-level plan includes the highest number of custom integrations.",
+            "The enterprise plan includes the highest number of custom integrations."
+        )
+        assert penalty <= SUPERLATIVE_SWAP_PENALTY

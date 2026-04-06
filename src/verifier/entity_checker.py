@@ -131,12 +131,31 @@ _SUPERLATIVE_ANTONYM_PAIRS: Tuple[Tuple[str, str], ...] = (
     ("most widely",        "least widely"),
     ("least widely",       "most widely"),
     ("most favorable",     "least favorable"),
+    ("least favorable",    "most favorable"),
     ("oldest",             "newest"),
     ("newest",             "oldest"),
     ("longest",            "shortest"),
     ("shortest",           "longest"),
     ("strongest",          "weakest"),
     ("weakest",            "strongest"),
+
+    # Enterprise tier / plan naming contradictions (Fix 3)
+    # These cover cases where the adversarial swap changes the plan tier
+    # rather than an explicit superlative word — e.g. "entry-level" is
+    # the polar opposite of "enterprise" in SLA and feature contexts.
+    ("entry-level",        "enterprise"),
+    ("enterprise",         "entry-level"),
+    ("entry-level",        "top-tier"),
+    ("top-tier",           "entry-level"),
+    ("basic",              "enterprise"),
+    ("enterprise",         "basic"),
+    ("lowest tier",        "highest tier"),
+    ("highest tier",       "lowest tier"),
+    ("newly onboarded",    "long-term"),
+    ("long-term",          "newly onboarded"),
+    ("first-responder",    "last-responder"),
+    ("lowest-priority",    "highest-priority"),
+    ("highest-priority",   "lowest-priority"),
 )
 
 # Build a flat lookup: given any term, get its known antonyms.
@@ -164,11 +183,18 @@ def _extract_superlative_terms(text: str) -> FrozenSet[str]:
     text_lower = text.lower()
     found: Set[str] = set()
 
-    # Check multi-word phrases first (longest match wins)
+    # Check multi-word phrases first (longest match wins).
+    # Boundary rules:
+    #   Lookbehind (?<![a-z-]): term must not be preceded by a letter or hyphen
+    #     so "dishonest" doesn't match the embedded substring "honest".
+    #   Lookahead  (?![a-z]):   term must not be followed by a letter.
+    #     Deliberately permits a trailing hyphen so compound words like
+    #     "shortest-lasting" and "longest-running" match their root superlative
+    #     ("shortest", "longest") without requiring the full compound to be in
+    #     the antonym map.
     all_terms = sorted(_ANTONYM_MAP.keys(), key=len, reverse=True)
     for term in all_terms:
-        # Whole-word boundary check using word characters
-        pattern = r"(?<![a-z-])" + re.escape(term) + r"(?![a-z-])"
+        pattern = r"(?<![a-z-])" + re.escape(term) + r"(?![a-z])"
         if re.search(pattern, text_lower):
             found.add(term)
 

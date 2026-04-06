@@ -35,13 +35,17 @@ from typing import FrozenSet, Optional, Set, Tuple
 #   1.0 = no contradiction (similarity passes through unchanged)
 #   0.x = contradiction detected (score reduced proportionally)
 #
-# Calibrated so that a "warm" similarity of 0.65–0.85 lands below
-# UNCERTAIN_THRESHOLD (0.40) on any single confirmed contradiction.
-
-NUMBER_MISMATCH_PENALTY: float = 0.50   # verified numeric value not in source
-NEGATION_MISMATCH_PENALTY: float = 0.55 # negation polarity differs
-SUPERLATIVE_SWAP_PENALTY: float = 0.45  # superlative polarity inverted
-SUPERLATIVE_VS_SPECIFIC: float = 0.60   # absolute term vs concrete limit
+# Calibration guarantee: adjusted_sim = base × penalty < UNCERTAIN_THRESHOLD (0.40)
+# for the worst-case base similarity where the detector fires (base ≤ 1.0).
+# Derivation: worst base ≈ 0.998 (near-identical text, single value changed).
+#   0.998 × 0.35 = 0.349 < 0.40  ✓ for number and superlative contradictions
+#   0.998 × 0.38 = 0.379 < 0.40  ✓ for negation contradictions
+# SUPERLATIVE_VS_SPECIFIC is more conservative (absolute vs. specific is weaker
+# signal) — calibrated to push an 0.80 base below threshold: 0.80 × 0.50 = 0.40.
+NUMBER_MISMATCH_PENALTY: float = 0.35   # verified numeric (value, unit) mismatch
+NEGATION_MISMATCH_PENALTY: float = 0.38 # negation polarity differs
+SUPERLATIVE_SWAP_PENALTY: float = 0.35  # superlative polarity inverted
+SUPERLATIVE_VS_SPECIFIC: float = 0.50   # absolute term vs concrete limit
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

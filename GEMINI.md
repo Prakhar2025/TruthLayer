@@ -10,7 +10,7 @@
 When starting a new session, always:
 1. Read `CLAUDE.md` for full architecture context
 2. Run `git log --oneline -5` to see recent changes
-3. Run `pytest tests/ -v` to verify tests pass before making changes
+3. Run `pytest tests/ -v` to verify all 138 tests pass before making changes
 
 ---
 
@@ -75,6 +75,8 @@ Invoke-WebRequest -Uri "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/p
 | sam build reports exit 1 | PowerShell stderr noise | Not a real error, check .aws-sam/build/ |
 | `content` in DynamoDB ProjectionExpression | `content` is a reserved word — throws ValidationException | Use `ExpressionAttributeNames={"#c": "content"}` |
 | `layer/python/` showing in git status | Files were committed before gitignore rule | Run `git rm -r --cached layer/python/` once |
+| S2A fires on faithful negation pairs | Blunt `has_negation(claim) != has_negation(source)` check | `_s2a_is_genuine_contradiction()` guard: 3-stage decision tree |
+| `without` in negation window causes false fire | `"without"` is a conditional preposition, not predicate negator | Removed from `_SOFT_NEG_WORDS`; Stage 1b handles req-conditional |
 
 ---
 
@@ -88,5 +90,16 @@ Set to **$20/month**. Alerts at 85% ($17) and 100% ($20).
 ---
 
 ## Competition Deadline
-**March 13, 2026** — Semi-finalist prototype article due.
-Status: Embedding caching ✓, Document IDs ✓, Rate limiting ✓, 3 integrations ✓
+**April 17, 2026** — Top 50 Finalist article due. Community voting April 17–23. Winners announced April 30.
+Status: Embedding caching ✓, Document IDs ✓, Rate limiting ✓, 3 integrations ✓,
+        300-case adversarial benchmark ✓, S2A vicinity guard ✓
+
+## Current Benchmark State (as of 2026-04-06)
+| Metric    | Value  | Notes |
+|-----------|--------|-------|
+| Precision | 95.33% | 7 hallucinations escaped (all Cat B+C edge cases) |
+| Recall    | 86.67% | 22 faithful over-flagged (13 Type A embedding floor) |
+| F1        | 90.79% | First time crossing 90% production barrier |
+| Accuracy  | 90.33% | |
+| Latency   | 925ms  | Avg end-to-end across 300 cases |
+| Tests     | 138    | All passing, zero regressions |

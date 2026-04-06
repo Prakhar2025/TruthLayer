@@ -3,9 +3,9 @@
 ## What This Project Is
 TruthLayer is a **production serverless API** that verifies AI-generated outputs against source documents using semantic similarity. It sits between AI models and end users, catching hallucinated claims in real time.
 
-- **Not a toy.** This is a deployed AWS API for the AWS 10,000 AIdeas Competition — Top 1,000 Semi-Finalist.
+- **Not a toy.** This is a deployed AWS API for the AWS 10,000 AIdeas Competition — **Top 50 Finalist**.
 - **Not frontend-heavy.** The core value is the dual-signal verification engine (embeddings + entity checker).
-- **Benchmarks:** Sub-1s latency, 100% precision, 87 tests passing.
+- **Benchmarks:** Sub-1s latency, 95.33% precision, 86.67% recall, F1 90.79% on 300 adversarial cases. 138 tests passing.
 
 ---
 
@@ -53,7 +53,7 @@ TruthLayer/
 │   ├── generate_api_key.py    # Creates tl_{token_urlsafe(32)}, stores SHA-256 in DynamoDB
 │   ├── deploy.py              # Build + deploy orchestrator
 │   └── test_api.sh            # End-to-end API test script
-└── tests/                     # 87 pytest unit tests (MockEmbeddingProvider, no AWS needed)
+└── tests/                     # 138 pytest unit tests (MockEmbeddingProvider, no AWS needed)
 ```
 
 ---
@@ -99,7 +99,7 @@ sam deploy
 # Generate a new API key
 python scripts/generate_api_key.py "OwnerName"
 
-# Run all 87 unit tests (no AWS needed)
+# Run all 138 unit tests (no AWS needed)
 pytest tests/ -v
 
 # Run tests with coverage
@@ -187,12 +187,22 @@ Email: prakhar230125@gmail.com
    - SHA-256 text hash as key, 7-day TTL, non-fatal cache failures
    - Response includes `cache_hits`/`cache_misses` in metadata
 3. **Entity checker** — Catches numerical, negation, and superlative contradictions
-4. **Document ID in /verify** — pass `document_ids` instead of raw text
-5. **Rate limiting** — `usage_count >= rate_limit` returns 429 with `Retry-After`
-6. **3 integration demos** — `examples/` directory
-7. **Python SDK** — `verify(document_ids=...)`, `upload_document()`, `delete_document()`
-8. **87 tests passing** — comprehensive regression suite
-9. **Premium dashboard** — 12-section landing page with live demo, architecture, pricing
+   - **S2A Vicinity Guard** — surgical negation polarity check; prevents false penalty
+     on semantically equivalent pairs ("below 250" ≡ "not exceed 250").
+     3-stage decision tree: threshold equivalence → requirement-conditional abort →
+     access-gate fire → negation-window anchor overlap.
+   - **Superlative antonym map** — 65+ bidirectional pairs, hyphenated compound support
+   - **Semantic antonym pairs** — 46 bidirectional pairs (permitted↔prohibited, etc.)
+   - **Unit-aware numeric comparison** — (value, unit) tuples, eliminates substring hits
+4. **300-case adversarial benchmark** — Numerical / Negation / Superlative suites
+   - Current: 95.33% Precision, 86.67% Recall, 90.79% F1, 90.33% Accuracy
+   - Avg latency: 925ms end-to-end
+5. **Document ID in /verify** — pass `document_ids` instead of raw text
+6. **Rate limiting** — `usage_count >= rate_limit` returns 429 with `Retry-After`
+7. **3 integration demos** — `examples/` directory
+8. **Python SDK** — `verify(document_ids=...)`, `upload_document()`, `delete_document()`
+9. **138 tests passing** — comprehensive regression suite (entity checker + verifier + SDK)
+10. **Premium dashboard** — 12-section landing page with live demo, architecture, pricing
 
 ---
 
@@ -204,4 +214,5 @@ Email: prakhar230125@gmail.com
 - **Dashboard:** Next.js 16 + Turbopack (Vercel)
 - **SDKs:** Python (stdlib only), TypeScript (fetch only)
 - **Tests:** pytest + MockEmbeddingProvider (no AWS needed)
-- **Competition:** AWS 10,000 AIdeas — Top 1,000 Semi-Finalist, deadline March 13 2026
+- **Competition:** AWS 10,000 AIdeas — **Top 50 Finalist**, article deadline April 17 2026
+- **Branch:** `main` (feature work on `feature/adversarial-benchmark`, merged)

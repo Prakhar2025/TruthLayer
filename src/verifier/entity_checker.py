@@ -172,6 +172,25 @@ def _build_antonym_map() -> None:
 
 _build_antonym_map()
 
+# ── Precompiled superlative term patterns ────────────────────────────────────
+# Built once at module import time: {term: compiled_pattern}.
+# Avoids re.escape() + re.compile() inside the hot loop in
+# _extract_superlative_terms(), saving N×M regex compilations per request
+# (N = number of claims, M = number of terms in the antonym map ≈ 80).
+_SUPERLATIVE_TERM_PATTERNS: dict[str, re.Pattern] = {
+    term: re.compile(
+        r"(?<![a-z-])" + re.escape(term) + r"(?![a-z])",
+        re.IGNORECASE,
+    )
+    for term in sorted(_ANTONYM_MAP.keys(), key=len, reverse=True)
+}
+
+# Terms sorted by length descending — used by _extract_superlative_terms()
+# for longest-match-first iteration.  Pre-sorted once, not on every call.
+_SUPERLATIVE_TERMS_BY_LENGTH: tuple = tuple(
+    sorted(_ANTONYM_MAP.keys(), key=len, reverse=True)
+)
+
 
 def _extract_superlative_terms(text: str) -> FrozenSet[str]:
     """
@@ -179,23 +198,14 @@ def _extract_superlative_terms(text: str) -> FrozenSet[str]:
 
     We do longest-match first so "most comprehensive" is matched before "most"
     is matched separately.  Multi-word phrases are checked before single words.
+    Uses the module-level _SUPERLATIVE_TERM_PATTERNS dict — patterns compiled
+    once at import time, not on every invocation.
     """
     text_lower = text.lower()
     found: Set[str] = set()
 
-    # Check multi-word phrases first (longest match wins).
-    # Boundary rules:
-    #   Lookbehind (?<![a-z-]): term must not be preceded by a letter or hyphen
-    #     so "dishonest" doesn't match the embedded substring "honest".
-    #   Lookahead  (?![a-z]):   term must not be followed by a letter.
-    #     Deliberately permits a trailing hyphen so compound words like
-    #     "shortest-lasting" and "longest-running" match their root superlative
-    #     ("shortest", "longest") without requiring the full compound to be in
-    #     the antonym map.
-    all_terms = sorted(_ANTONYM_MAP.keys(), key=len, reverse=True)
-    for term in all_terms:
-        pattern = r"(?<![a-z-])" + re.escape(term) + r"(?![a-z])"
-        if re.search(pattern, text_lower):
+    for term in _SUPERLATIVE_TERMS_BY_LENGTH:
+        if _SUPERLATIVE_TERM_PATTERNS[term].search(text_lower):
             found.add(term)
 
     return frozenset(found)
@@ -275,6 +285,19 @@ _OTHER_UNITS: dict[str, str] = {
 
 _ALL_UNITS: dict[str, str] = {**_TIME_UNITS, **_OTHER_UNITS}
 
+# ── Module-level regex for degrees normalisation ─────────────────────────────
+# Used inside _unit_after_number() to strip "degrees " before the unit lookup.
+# Compiled once at import time — called on every number match in a sentence.
+_DEGREES_RE: re.Pattern = re.compile(r"^degrees?\s+", re.IGNORECASE)
+
+# ── Module-level tokenizer regexes ───────────────────────────────────────────
+# _WORD_TOKENS_RE  : used by _neg_window_tokens() to split text into words.
+# _ALPHA_TOKENS_RE : used by _content_tokens() to extract alpha-only tokens.
+# Explicit module-level compilation avoids relying on Python's internal
+# re._cache for hot-path functions.
+_WORD_TOKENS_RE:  re.Pattern = re.compile(r"[\w'-]+")
+_ALPHA_TOKENS_RE: re.Pattern = re.compile(r"[a-z]+")
+
 
 def _unit_after_number(text: str, end_pos: int) -> Optional[str]:
     """
@@ -287,7 +310,7 @@ def _unit_after_number(text: str, end_pos: int) -> Optional[str]:
     tail = text[end_pos:end_pos + 40].strip().lower()
 
     # Normalise "degrees <unit>" → "<unit>" so "320 degrees Celsius" → "celsius"
-    tail = re.sub(r"^degrees?\s+", "", tail)
+    tail = _DEGREES_RE.sub("", tail)
 
     # Try longest match first so "km/h" beats "km"
     candidates = sorted(_ALL_UNITS.keys(), key=len, reverse=True)
@@ -490,11 +513,45 @@ _STOPWORDS: frozenset = frozenset({
     "process", "account", "accounts", "document", "documents",
 })
 
+# ── S2A Stage 1b/1c: module-level compiled patterns ─────────────────────────
+# These four regexes were previously compiled inside _s2a_is_genuine_contradiction()
+# on EVERY invocation. That function sits in the hot path of compute_alignment_penalty()
+# which is called for each claim with a negation mismatch. Moving to module level
+# ensures they are compiled exactly once during Lambda cold-start initialisation.
+#
+# _REQ_POS_RE       : positive-requirement verbs ("requires", "mandatory", "must", …)
+# _NEG_COND_RE      : negative-conditional constructions ("not permitted without", …)
+# _ACCESS_WITHOUT_RE: unconditional-access patterns ("accessible without", …)
+# _GATE_REQUIRED_RE : gating/requirement patterns for Stage 1c fire condition
+_REQ_POS_RE: re.Pattern = re.compile(
+    r"\b(requires?|is\s+required|mandatory|must\s+(?!not\b)|is\s+needed"
+    r"|need(?:s|ed)\s+to|has\s+to|have\s+to)\b",
+    re.IGNORECASE,
+)
+_NEG_COND_RE: re.Pattern = re.compile(
+    r"\b(not\s+permitted\s+without"
+    r"|cannot\s+(?:[\w]+\s+){0,3}without"
+    r"|may\s+not\s+(?:[\w]+\s+){0,3}without"
+    r"|must\s+not\s+be\s+omitted"
+    r"|not\s+allowed\s+without"
+    r"|shall\s+not\s+(?:[\w]+\s+){0,3}without)\b",
+    re.IGNORECASE,
+)
+_ACCESS_WITHOUT_RE: re.Pattern = re.compile(
+    r"\b(?:accessible|available|open|public(?:ly)?)\b.*\bwithout\b"
+    r"|\bwithout\b.*\b(?:authentication|authorization|verification|credential)",
+    re.IGNORECASE,
+)
+_GATE_REQUIRED_RE: re.Pattern = re.compile(
+    r"\b(?:requires?|is\s+required|mandatory|must\s+(?!not\b)|needed)\b",
+    re.IGNORECASE,
+)
+
 
 def _content_tokens(text: str) -> frozenset:
     """Extract alphabetic content words of length >= _ANCHOR_MIN_LEN."""
     return frozenset(
-        w for w in re.findall(r"[a-z]+", text.lower())
+        w for w in _ALPHA_TOKENS_RE.findall(text.lower())
         if len(w) >= _ANCHOR_MIN_LEN and w not in _STOPWORDS
     )
 
@@ -508,7 +565,7 @@ def _neg_window_tokens(text: str, window: int = 4) -> frozenset:
     If the window contains no significant content words, the negation is
     probably at sentence-end or in a structural position ("not exceed").
     """
-    words = re.findall(r"[\w'-]+", text.lower())
+    words = _WORD_TOKENS_RE.findall(text.lower())
     anchors: Set[str] = set()
     for i, word in enumerate(words):
         stripped = word.strip("'-")
@@ -573,24 +630,8 @@ def _s2a_is_genuine_contradiction(claim: str, source: str) -> bool:
     # "X requires Y" ≡ "X is not permitted without Y" — same precondition.
     # The key linguistic signal: "may not be Z without Y" (multi-word passive)
     # must match even when "be" sits between "not" and the verb phrase.
-    _REQ_POS = re.compile(
-        r"\b(requires?|is\s+required|mandatory|must\s+(?!not\b)|is\s+needed"
-        r"|need(?:s|ed)\s+to|has\s+to|have\s+to)\b",
-        re.IGNORECASE,
-    )
-    _NEG_COND = re.compile(
-        # Allow multi-word verb phrases between "not" and "without":
-        # "may not be transferred without", "cannot be shared without"
-        r"\b(not\s+permitted\s+without"
-        r"|cannot\s+(?:[\w]+\s+){0,3}without"
-        r"|may\s+not\s+(?:[\w]+\s+){0,3}without"
-        r"|must\s+not\s+be\s+omitted"
-        r"|not\s+allowed\s+without"
-        r"|shall\s+not\s+(?:[\w]+\s+){0,3}without)\b",
-        re.IGNORECASE,
-    )
-    if (bool(_REQ_POS.search(claim_l)) or bool(_REQ_POS.search(source_l))) and \
-       (bool(_NEG_COND.search(claim_l)) or bool(_NEG_COND.search(source_l))):
+    if (bool(_REQ_POS_RE.search(claim_l)) or bool(_REQ_POS_RE.search(source_l))) and \
+       (bool(_NEG_COND_RE.search(claim_l)) or bool(_NEG_COND_RE.search(source_l))):
         shared_content = _content_tokens(claim_l) & _content_tokens(source_l)
         if len(shared_content) >= 2:
             return False  # same precondition, different syntactic form — abort
@@ -600,17 +641,8 @@ def _s2a_is_genuine_contradiction(claim: str, source: str) -> bool:
     # This is a GENUINE contradiction (one says no gate, other says gate exists)
     # that Stage 2 misses because "without" is excluded from _SOFT_NEG_WORDS.
     # Detect via the presence of an access-without pattern paired with required.
-    _ACCESS_WITHOUT = re.compile(
-        r"\b(?:accessible|available|open|public(?:ly)?)\b.*\bwithout\b"
-        r"|\bwithout\b.*\b(?:authentication|authorization|verification|credential)",
-        re.IGNORECASE,
-    )
-    _GATE_REQUIRED = re.compile(
-        r"\b(?:requires?|is\s+required|mandatory|must\s+(?!not\b)|needed)\b",
-        re.IGNORECASE,
-    )
-    if (bool(_ACCESS_WITHOUT.search(claim_l)) and bool(_GATE_REQUIRED.search(source_l))) or \
-       (bool(_ACCESS_WITHOUT.search(source_l)) and bool(_GATE_REQUIRED.search(claim_l))):
+    if (bool(_ACCESS_WITHOUT_RE.search(claim_l)) and bool(_GATE_REQUIRED_RE.search(source_l))) or \
+       (bool(_ACCESS_WITHOUT_RE.search(source_l)) and bool(_GATE_REQUIRED_RE.search(claim_l))):
         # Confirm a shared security/gating term exists between the two sentences
         shared_content = _content_tokens(claim_l) & _content_tokens(source_l)
         if shared_content:
@@ -729,6 +761,14 @@ def _semantic_negation_contradict(claim: str, source: str) -> bool:
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 5  Legacy helpers (public API — unchanged signatures)
 # ═══════════════════════════════════════════════════════════════════════════════
+# ── Module-level absolute-superlative pattern ────────────────────────────────
+# Compiled once at import.  has_superlative() is called inside the hot path
+# of compute_alignment_penalty() on every single claim.
+_ABSOLUTE_RE: re.Pattern = re.compile(
+    r"\b(unlimited|infinite|always|every|all|any|free)\b",
+    re.IGNORECASE,
+)
+
 
 def has_superlative(text: str) -> bool:
     """
@@ -736,10 +776,6 @@ def has_superlative(text: str) -> bool:
 
     Backward-compatible signature retained for existing tests.
     """
-    _ABSOLUTE_RE = re.compile(
-        r"\b(unlimited|infinite|always|every|all|any|free)\b",
-        re.IGNORECASE,
-    )
     return bool(_ABSOLUTE_RE.search(text))
 
 

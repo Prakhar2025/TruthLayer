@@ -8,7 +8,7 @@ from src.embeddings.base import EmbeddingProvider
 from src.verifier.claim_extractor import ClaimExtractor
 from src.verifier.similarity_engine import SimilarityEngine
 from src.verifier.confidence_scorer import ConfidenceScorer
-from src.verifier.entity_checker import compute_alignment_penalty
+from src.verifier.entity_checker import compute_alignment_penalty, ContradictionEvidence
 from src.utils.text_splitter import chunk_text
 
 logger = logging.getLogger(__name__)
@@ -146,8 +146,9 @@ class TruthLayerVerifier:
 
             # Apply entity contradiction check (catches what embeddings miss).
             # Numbers, negations, and superlatives are compared literally.
-            # A penalty < 1.0 means a contradiction was detected.
-            alignment = compute_alignment_penalty(claim, matched_source)
+            # A penalty < 1.0 means a contradiction was detected; evidence
+            # carries the structured proof of which signal fired and why.
+            alignment, evidence = compute_alignment_penalty(claim, matched_source)
             adjusted_similarity = similarity * alignment
 
             # Classify using the adjusted score
@@ -161,7 +162,8 @@ class TruthLayerVerifier:
                 "status": status,
                 "confidence": confidence,
                 "similarity_score": round(adjusted_similarity, 4),
-                "matched_source": matched_source[:200] if matched_source else ""
+                "matched_source": matched_source[:200] if matched_source else "",
+                "contradiction_evidence": evidence.to_dict() if evidence is not None else None,
             })
 
             # Update summary

@@ -873,29 +873,33 @@ def has_superlative(text: str) -> bool:
 # SECTION 6  Main entry point
 # ═══════════════════════════════════════════════════════════════════════════════
 
-def compute_alignment_penalty(claim: str, matched_source: str) -> float:
+def compute_alignment_penalty(
+    claim: str,
+    matched_source: str,
+) -> Tuple[float, Optional[ContradictionEvidence]]:
     """
     Compute a multiplicative penalty factor [0.0, 1.0] reflecting the degree
     of factual contradiction between a claim and its best-matching source.
+    Also returns structured evidence identifying which detector fired and why.
 
     Three contradiction signals are evaluated independently; the minimum
-    (most restrictive) penalty is returned.
+    (most restrictive) penalty and its corresponding evidence are returned.
 
-    Signal 1 — Numerical mismatch (unit-aware)
+    Signal 1 - Numerical mismatch (unit-aware)
         Fires when the claim introduces a (value, unit) pair that
         cannot be found verbatim in the source.
-        Catches: "5 months" vs "5 years", "32°C" vs "320°C",
+        Catches: "5 months" vs "5 years", "32C" vs "320C",
                  "40mg" vs "400mg", "99.99%" vs "99.9%"
 
-    Signal 2 — Negation / polarity mismatch
-        a) Explicit negation markers (not/never/non-/prohibited/…)
-        b) Semantic antonym pairs (permitted↔prohibited, safe↔contraindicated)
+    Signal 2 - Negation / polarity mismatch
+        a) Explicit negation markers (not/never/non-/prohibited/...)
+        b) Semantic antonym pairs (permitted vs prohibited, safe vs contraindicated)
         Fires when claim and source have opposing polarity.
 
-    Signal 3 — Superlative swap
+    Signal 3 - Superlative swap
         Fires when claim contains a superlative term (highest/lowest/
-        fastest/unlimited/…) whose antonym appears in the source.
-        Catches: "highest→lowest", "most→least", "unlimited→limited"
+        fastest/unlimited/...) whose antonym appears in the source.
+        Catches: "highest vs lowest", "most vs least", "unlimited vs limited"
         Also fires for absolute vs specific: "unlimited" vs "100,000 calls"
 
     Args:
@@ -903,18 +907,49 @@ def compute_alignment_penalty(claim: str, matched_source: str) -> float:
         matched_source: The best-matching source fragment from the corpus.
 
     Returns:
-        Float in (0.0, 1.0]:
-          1.0 = no contradiction detected — similarity score unchanged
-          <1.0 = contradiction detected — similarity reduced accordingly
+        Tuple of (penalty, evidence):
+          penalty  : Float in (0.0, 1.0].
+                     1.0  = no contradiction detected, similarity unchanged.
+                     <1.0 = contradiction detected, similarity reduced.
+          evidence : ContradictionEvidence describing the firing signal,
+                     or None when penalty is 1.0 (no contradiction).
     """
     if not matched_source:
-        return 1.0
+        return 1.0, None
 
-    penalty = 1.0
+    penalty: float = 1.0
+    evidence: Optional[ContradictionEvidence] = None
 
     # ── Signal 1: Unit-aware number mismatch ──────────────────────────────────
     if _numbers_contradict(claim, matched_source):
-        penalty = min(penalty, NUMBER_MISMATCH_PENALTY)
+        sig_penalty = NUMBER_MISMATCH_PENALTY
+        # Extract the first mismatched (value, unit) pair for the evidence fragment.
+        claim_pairs  = _extract_number_unit_pairs(claim)
+        source_pairs = _extract_number_unit_pairs(matched_source)
+        mismatched   = claim_pairs - source_pairs
+        if mismatched:
+            val, unit  = next(iter(mismatched))
+            claim_frag = f"{val} {unit}".strip() if unit else val
+        else:
+            claim_frag = ""
+        src_frag = ", ".join(
+            f"{v} {u}".strip() if u else v
+            for v, u in sorted(source_pairs)
+        )
+        sig_evidence = ContradictionEvidence(
+            signal          = "NUMERICAL_MISMATCH",
+            severity        = ContradictionEvidence._severity_from_penalty(sig_penalty),
+            penalty_applied = sig_penalty,
+            claim_fragment  = claim_frag,
+            source_fragment = src_frag,
+            explanation     = (
+                f"Claim states {claim_frag}; "
+                f"source specifies {src_frag}. Numerical value mismatch."
+            ),
+        )
+        if sig_penalty <= penalty:
+            penalty  = sig_penalty
+            evidence = sig_evidence
 
     # ── Signal 2a: Explicit negation polarity mismatch (vicinity-guarded) ────
     # The blunt has_negation polarity check is retained as the PRE-FILTER:
@@ -925,19 +960,116 @@ def compute_alignment_penalty(claim: str, matched_source: str) -> float:
     source_negated = has_negation(matched_source)
     if claim_negated != source_negated:
         if _s2a_is_genuine_contradiction(claim, matched_source):
-            penalty = min(penalty, NEGATION_MISMATCH_PENALTY)
+            sig_penalty  = NEGATION_MISMATCH_PENALTY
+            # Capture the negation token from whichever sentence carries negation.
+            neg_sentence = claim if claim_negated else matched_source
+            neg_match    = _NEGATION_RE.search(neg_sentence)
+            claim_frag   = neg_match.group(0) if neg_match else ""
+            sig_evidence = ContradictionEvidence(
+                signal          = "S2A_NEGATION_POLARITY",
+                severity        = ContradictionEvidence._severity_from_penalty(sig_penalty),
+                penalty_applied = sig_penalty,
+                claim_fragment  = claim_frag,
+                source_fragment = "",
+                explanation     = (
+                    "Claim and source have opposing negation polarity "
+                    "on a shared predicate."
+                ),
+            )
+            if sig_penalty <= penalty:
+                penalty  = sig_penalty
+                evidence = sig_evidence
 
     # ── Signal 2b: Semantic antonym contradiction ──────────────────────────────
     if _semantic_negation_contradict(claim, matched_source):
-        penalty = min(penalty, NEGATION_MISMATCH_PENALTY)
+        sig_penalty     = NEGATION_MISMATCH_PENALTY
+        # Recover the antonym pair that triggered the match for the evidence.
+        # Mirrors the lookup inside _semantic_negation_contradict() without
+        # modifying that helper's signature.
+        claim_frag_ant  = ""
+        source_frag_ant = ""
+        claim_lower     = claim.lower()
+        source_lower    = matched_source.lower()
+        candidates      = sorted(_SEMANTIC_ANTONYM_MAP.keys(), key=len, reverse=True)
+        for term in candidates:
+            antonyms     = _SEMANTIC_ANTONYM_MAP[term]
+            term_pattern = r"(?<![a-z])" + re.escape(term) + r"(?![a-z])"
+            if re.search(term_pattern, claim_lower):
+                for antonym in antonyms:
+                    ant_pattern = r"(?<![a-z])" + re.escape(antonym) + r"(?![a-z])"
+                    if re.search(ant_pattern, source_lower):
+                        claim_frag_ant  = term
+                        source_frag_ant = antonym
+                        break
+            if claim_frag_ant:
+                break
+        sig_evidence = ContradictionEvidence(
+            signal          = "SEMANTIC_ANTONYM",
+            severity        = ContradictionEvidence._severity_from_penalty(sig_penalty),
+            penalty_applied = sig_penalty,
+            claim_fragment  = claim_frag_ant,
+            source_fragment = source_frag_ant,
+            explanation     = (
+                f"'{claim_frag_ant}' in claim contradicts "
+                f"'{source_frag_ant}' in source (semantic antonym pair)."
+            ),
+        )
+        if sig_penalty <= penalty:
+            penalty  = sig_penalty
+            evidence = sig_evidence
 
     # ── Signal 3a: Superlative polarity swap ──────────────────────────────────
     if _superlatives_contradict(claim, matched_source):
-        penalty = min(penalty, SUPERLATIVE_SWAP_PENALTY)
+        sig_penalty  = SUPERLATIVE_SWAP_PENALTY
+        # Recover the matched (c_term, antonym) pair for the evidence.
+        # _superlatives_contradict() returns only bool, so we re-run the
+        # minimal frozenset intersection here to surface the term names.
+        claim_terms  = _extract_superlative_terms(claim)
+        source_terms = _extract_superlative_terms(matched_source)
+        c_term_found = ""
+        ant_found    = ""
+        for c_term in claim_terms:
+            antonyms = _ANTONYM_MAP.get(c_term, frozenset())
+            overlap  = antonyms & source_terms
+            if overlap:
+                c_term_found = c_term
+                ant_found    = next(iter(overlap))
+                break
+        sig_evidence = ContradictionEvidence(
+            signal          = "SUPERLATIVE_SWAP",
+            severity        = ContradictionEvidence._severity_from_penalty(sig_penalty),
+            penalty_applied = sig_penalty,
+            claim_fragment  = c_term_found,
+            source_fragment = ant_found,
+            explanation     = (
+                f"Superlative '{c_term_found}' in claim is the "
+                f"antonym of '{ant_found}' in source."
+            ),
+        )
+        if sig_penalty <= penalty:
+            penalty  = sig_penalty
+            evidence = sig_evidence
 
     # ── Signal 3b: Absolute claim vs concrete limit ───────────────────────────
     source_nums = extract_numbers(matched_source)
     if has_superlative(claim) and source_nums:
-        penalty = min(penalty, SUPERLATIVE_VS_SPECIFIC)
+        sig_penalty  = SUPERLATIVE_VS_SPECIFIC
+        abs_match    = _ABSOLUTE_RE.search(claim)
+        claim_frag   = abs_match.group(0) if abs_match else ""
+        src_frag     = next(iter(sorted(source_nums)))
+        sig_evidence = ContradictionEvidence(
+            signal          = "SUPERLATIVE_VS_SPECIFIC",
+            severity        = ContradictionEvidence._severity_from_penalty(sig_penalty),
+            penalty_applied = sig_penalty,
+            claim_fragment  = claim_frag,
+            source_fragment = src_frag,
+            explanation     = (
+                f"Claim uses absolute term '{claim_frag}'; "
+                f"source specifies a concrete limit ({src_frag})."
+            ),
+        )
+        if sig_penalty <= penalty:
+            penalty  = sig_penalty
+            evidence = sig_evidence
 
-    return penalty
+    return penalty, evidence

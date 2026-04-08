@@ -100,76 +100,76 @@ class TestComputeAlignmentPenalty:
     """Tests for the main alignment penalty function."""
 
     def test_matching_numbers(self):
-        """Aligned numbers → no penalty."""
-        penalty = compute_alignment_penalty(
+        """Aligned numbers -> no penalty."""
+        penalty, _ = compute_alignment_penalty(
             "costs $29 per month",
             "The Starter plan costs $29 per month"
         )
         assert penalty == 1.0
 
     def test_mismatched_numbers(self):
-        """Wrong numbers → NUMBER_MISMATCH_PENALTY."""
-        penalty = compute_alignment_penalty(
+        """Wrong numbers -> NUMBER_MISMATCH_PENALTY."""
+        penalty, _ = compute_alignment_penalty(
             "costs $19 per month",
             "The Starter plan costs $29 per month"
         )
         assert penalty == NUMBER_MISMATCH_PENALTY
 
     def test_subtle_percentage_mismatch(self):
-        """99.99% vs 99.9% → penalty."""
-        penalty = compute_alignment_penalty(
+        """99.99% vs 99.9% -> penalty."""
+        penalty, _ = compute_alignment_penalty(
             "guarantees 99.99% uptime",
             "TechCorp guarantees 99.9% uptime"
         )
         assert penalty == NUMBER_MISMATCH_PENALTY
 
     def test_negation_mismatch(self):
-        """Negation in one but not the other → penalty."""
-        penalty = compute_alignment_penalty(
+        """Negation in one but not the other -> penalty."""
+        penalty, _ = compute_alignment_penalty(
             "No free trial is available",
             "All plans include a 14-day free trial"
         )
         assert penalty <= NEGATION_MISMATCH_PENALTY
 
     def test_superlative_vs_specific(self):
-        """'unlimited' vs a specific number → penalty."""
-        penalty = compute_alignment_penalty(
+        """'unlimited' vs a specific number -> penalty."""
+        penalty, _ = compute_alignment_penalty(
             "The Pro plan includes unlimited API calls",
             "The Pro plan costs $99 per month with 100,000 API calls included"
         )
         assert penalty <= SUPERLATIVE_VS_SPECIFIC
 
     def test_free_vs_paid(self):
-        """'free shipping' vs 'customer responsibility' → no worse than 1.0."""
-        penalty = compute_alignment_penalty(
+        """'free shipping' vs 'customer responsibility' -> no worse than 1.0."""
+        penalty, _ = compute_alignment_penalty(
             "Return shipping is free on all orders",
             "Return shipping is the customer's responsibility"
         )
         assert penalty <= 1.0
 
     def test_no_contradiction(self):
-        """Perfectly aligned → 1.0."""
-        penalty = compute_alignment_penalty(
+        """Perfectly aligned -> 1.0."""
+        penalty, _ = compute_alignment_penalty(
             "Refunds are processed within 5-7 business days",
             "Refunds are processed within 5-7 business days"
         )
         assert penalty == 1.0
 
     def test_empty_source(self):
-        """No source → no penalty (nothing to contradict)."""
-        assert compute_alignment_penalty("any claim", "") == 1.0
+        """No source -> no penalty (nothing to contradict)."""
+        assert compute_alignment_penalty("any claim", "") == (1.0, None)
 
     def test_hours_vs_days(self):
-        """'24 hours' when source says '5-7 days' → penalty."""
-        penalty = compute_alignment_penalty(
+        """'24 hours' when source says '5-7 days' -> penalty."""
+        penalty, _ = compute_alignment_penalty(
             "Refunds are processed within 24 hours",
             "Refunds are processed within 5-7 business days"
         )
         assert penalty == NUMBER_MISMATCH_PENALTY
 
     def test_compound_penalty(self):
-        """Multiple contradictions → lowest penalty wins."""
-        penalty = compute_alignment_penalty(
+        """Multiple contradictions -> lowest penalty wins."""
+        penalty, _ = compute_alignment_penalty(
             "No plan costs $19",
             "All plans include a 14-day free trial at $29"
         )
@@ -325,21 +325,21 @@ class TestSuperlativeSwap:
 
     def test_superlative_swap_applies_penalty(self):
         """End-to-end: superlative swap must reduce the alignment penalty."""
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "The lowest availability tier guarantees a maximum of 26 minutes of downtime per year.",
             "The highest availability tier guarantees a maximum of 26 minutes of downtime per year."
         )
         assert penalty <= SUPERLATIVE_SWAP_PENALTY
 
     def test_unlimited_vs_limited_penalty(self):
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "The Pro plan offers limited API calls per month.",
             "The Pro plan offers unlimited API calls per month."
         )
         assert penalty <= SUPERLATIVE_SWAP_PENALTY
 
     def test_oldest_vs_newest_penalty(self):
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "The oldest AI model delivers the greatest inference speed improvement.",
             "The newest AI model delivers the greatest inference speed improvement."
         )
@@ -401,14 +401,14 @@ class TestSemanticNegationAntonyms:
 
     def test_penalty_applied_for_semantic_antonym(self):
         """End-to-end: semantic antonym must reduce alignment penalty."""
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "The medication is safe for patients with renal impairment.",
             "The medication is contraindicated in patients with renal impairment."
         )
         assert penalty <= NEGATION_MISMATCH_PENALTY
 
     def test_penalty_permitted_vs_prohibited(self):
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "The export of this technology is permitted without a federal license.",
             "The export of this technology is prohibited without a federal license."
         )
@@ -483,7 +483,7 @@ class TestS2AVicinityGuard:
 
     def test_abort_penalty_not_applied_for_threshold_equivalent(self):
         """End-to-end: equivalent threshold pair must NOT reduce the penalty."""
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "Drug concentration must remain below 250 mg/dL.",
             "Drug concentration must not exceed 250 mg/dL.",
         )
@@ -494,7 +494,7 @@ class TestS2AVicinityGuard:
 
     def test_abort_penalty_not_applied_for_requirement_equivalent(self):
         """End-to-end: requirement-conditional pair must NOT reduce the penalty."""
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "Transfer of the contract requires written authorization.",
             "The contract may not be transferred without written authorization.",
         )
@@ -520,7 +520,7 @@ class TestS2AVicinityGuard:
 
     def test_fire_genuine_penalty_applied_for_access_contradiction(self):
         """End-to-end: genuine access contradiction must still apply the penalty."""
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "Remote access is permitted for all employees.",
             "Remote access is not permitted for standard employees.",
         )
@@ -607,7 +607,7 @@ class TestTierNameContradictions:
 
     def test_tier_swap_applies_penalty(self):
         """End-to-end: tier name swap must reduce the alignment penalty."""
-        penalty = compute_alignment_penalty(
+        penalty, _ = compute_alignment_penalty(
             "The entry-level plan includes the highest number of custom integrations.",
             "The enterprise plan includes the highest number of custom integrations."
         )

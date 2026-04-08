@@ -24,7 +24,97 @@ Design constraints:
 from __future__ import annotations
 
 import re
-from typing import FrozenSet, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from typing import FrozenSet, Literal, Optional, Set, Tuple
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 0  Contradiction Evidence data model
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# ContradictionEvidence is a frozen (immutable) dataclass produced by
+# compute_alignment_penalty() whenever a contradiction is detected.
+#
+# It captures WHICH detector fired, HOW severe the penalty is, and WHAT
+# exact fragments from the claim and source triggered the flag — enabling
+# the API to return machine-readable evidence, not just a penalty float.
+#
+# Severity derivation is deterministic from the penalty constant:
+#   ≤ 0.35  →  CRITICAL  (NUMBER, SUPERLATIVE_SWAP — strongest signal)
+#   ≤ 0.38  →  HIGH      (NEGATION — strong signal)
+#   ≤ 0.50  →  MEDIUM    (SUPERLATIVE_VS_SPECIFIC — weaker signal)
+#   > 0.50  →  LOW       (reserved for future soft penalties)
+
+SignalType = Literal[
+    "NUMERICAL_MISMATCH",
+    "S2A_NEGATION_POLARITY",
+    "SEMANTIC_ANTONYM",
+    "SUPERLATIVE_SWAP",
+    "SUPERLATIVE_VS_SPECIFIC",
+]
+
+
+@dataclass(frozen=True)
+class ContradictionEvidence:
+    """
+    Immutable evidence record produced when a contradiction detector fires.
+
+    Returned alongside the penalty float by compute_alignment_penalty() so
+    callers (verifier.py → handler.py → API response) can surface structured
+    machine-readable proof of why a claim was flagged, not just a numeric score.
+
+    Fields
+    ------
+    signal          : Which of the 5 detectors fired (see SignalType).
+    severity        : Human-readable risk label derived from penalty_applied.
+    penalty_applied : The raw multiplicative penalty constant (e.g. 0.35).
+    claim_fragment  : The contradicting substring extracted from the claim.
+    source_fragment : The contradicted substring extracted from the source.
+    explanation     : One-line human-readable description of the contradiction.
+    """
+
+    signal: SignalType
+    severity: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    penalty_applied: float
+    claim_fragment: str = ""
+    source_fragment: str = ""
+    explanation: str = ""
+
+    @staticmethod
+    def _severity_from_penalty(penalty: float) -> str:
+        """
+        Deterministically derive a severity label from the penalty constant.
+
+        Calibrated to match the penalty constants defined in Section 1:
+          NUMBER_MISMATCH_PENALTY   = 0.35  →  CRITICAL
+          SUPERLATIVE_SWAP_PENALTY  = 0.35  →  CRITICAL
+          NEGATION_MISMATCH_PENALTY = 0.38  →  HIGH
+          SUPERLATIVE_VS_SPECIFIC   = 0.50  →  MEDIUM
+        """
+        if penalty <= 0.35:
+            return "CRITICAL"
+        if penalty <= 0.38:
+            return "HIGH"
+        if penalty <= 0.50:
+            return "MEDIUM"
+        return "LOW"
+
+    def to_dict(self) -> dict:
+        """
+        Return all fields as a plain Python dict for JSON serialization.
+
+        Called by verifier.py when building the per-claim result dict.
+        The Lambda handler's json.dumps(body, default=str) will serialize
+        this dict automatically without any further transformation.
+        """
+        return {
+            "signal": self.signal,
+            "severity": self.severity,
+            "penalty_applied": self.penalty_applied,
+            "claim_fragment": self.claim_fragment,
+            "source_fragment": self.source_fragment,
+            "explanation": self.explanation,
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

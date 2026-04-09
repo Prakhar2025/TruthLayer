@@ -136,6 +136,9 @@ function Nav() {
           <Link href="/dashboard/verify" className="btn-secondary" style={{ textDecoration: "none", fontSize: "0.82rem", padding: "7px 16px" }}>
             Try Demo
           </Link>
+          <Link href="/analyze" className="btn-secondary" style={{ textDecoration: "none", fontSize: "0.82rem", padding: "7px 16px" }}>
+            Analyzer
+          </Link>
           <Link href="/get-api-key" className="btn-secondary" style={{ textDecoration: "none", fontSize: "0.82rem", padding: "7px 16px" }}>
             Get API Key
           </Link>

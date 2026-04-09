@@ -11,12 +11,22 @@ interface VerifyRequest {
   source_documents: string[];
 }
 
+interface ContradictionEvidence {
+  signal: 'NUMERICAL_MISMATCH' | 'S2A_NEGATION_POLARITY' | 'SEMANTIC_ANTONYM' | 'SUPERLATIVE_SWAP' | 'SUPERLATIVE_VS_SPECIFIC';
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  penalty_applied: number;
+  claim_fragment: string;
+  source_fragment: string;
+  explanation: string;
+}
+
 interface Claim {
   text: string;
   status: 'VERIFIED' | 'UNCERTAIN' | 'UNSUPPORTED';
   confidence: number;
   similarity_score: number;
   matched_source: string;
+  contradiction_evidence?: ContradictionEvidence | null;
 }
 
 interface VerifyResponse {
@@ -190,6 +200,7 @@ export async function generateApiKey(
 // ---- Types re-export ----
 export type {
   Claim,
+  ContradictionEvidence,
   VerifyRequest,
   VerifyResponse,
   Document,

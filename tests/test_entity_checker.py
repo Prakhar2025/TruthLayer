@@ -612,3 +612,72 @@ class TestTierNameContradictions:
             "The enterprise plan includes the highest number of custom integrations."
         )
         assert penalty <= SUPERLATIVE_SWAP_PENALTY
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# NEW: ContradictionEvidence structured evidence — signal, severity, fragments
+# ══════════════════════════════════════════════════════════════════════════════
+
+import json as _json
+from src.verifier.entity_checker import ContradictionEvidence
+
+
+class TestContradictionEvidence:
+    """
+    Validates that compute_alignment_penalty() returns correctly populated
+    ContradictionEvidence objects for all five detector signals.
+
+    Each test corresponds to a real-world adversarial case from the benchmark.
+    """
+
+    def test_numerical_evidence_signal(self):
+        """NUMERICAL_MISMATCH: 2% vs 4% triggers CRITICAL evidence."""
+        claim  = "The GDPR fine is 2% of revenue."
+        source = "GDPR fines can reach up to 4% of annual global turnover."
+        penalty, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        assert evidence.signal == "NUMERICAL_MISMATCH"
+        assert evidence.severity == "CRITICAL"
+        assert evidence.penalty_applied == 0.35
+        assert "2" in evidence.claim_fragment or "2%" in evidence.claim_fragment
+
+    def test_negation_evidence_signal(self):
+        """Aspirin / children: negation polarity contradiction produces HIGH evidence."""
+        claim  = "Aspirin is safe for children with fever."
+        source = "Aspirin should NOT be given to children — risk of Reye syndrome."
+        penalty, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        assert evidence.signal in ("S2A_NEGATION_POLARITY", "SEMANTIC_ANTONYM")
+        assert evidence.penalty_applied <= 0.38
+
+    def test_superlative_swap_evidence_signal(self):
+        """lowest vs highest storage capacity -> SUPERLATIVE_SWAP, CRITICAL."""
+        claim  = "The plan offers the lowest storage capacity."
+        source = "Enterprise tier provides the highest storage capacity available."
+        penalty, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        assert evidence.signal == "SUPERLATIVE_SWAP"
+        assert evidence.severity == "CRITICAL"
+
+    def test_no_evidence_for_faithful_claim(self):
+        """Faithful 4% vs 4% pair: penalty must be 1.0 and evidence must be None."""
+        claim  = "The GDPR fine is 4% of revenue."
+        source = "GDPR fines can reach up to 4% of annual global turnover."
+        penalty, evidence = compute_alignment_penalty(claim, source)
+        assert penalty == 1.0
+        assert evidence is None
+
+    def test_evidence_to_dict_is_json_serializable(self):
+        """evidence.to_dict() must produce a clean JSON-serializable dict."""
+        claim  = "The GDPR fine is 2% of revenue."
+        source = "GDPR fines can reach up to 4% of annual global turnover."
+        _, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        # Must not raise
+        serialized = _json.dumps(evidence.to_dict())
+        parsed = _json.loads(serialized)
+        assert "signal" in parsed
+        assert "explanation" in parsed
+        assert "severity" in parsed
+        assert "penalty_applied" in parsed
+

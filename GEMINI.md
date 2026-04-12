@@ -10,7 +10,7 @@
 When starting a new session, always:
 1. Read `CLAUDE.md` for full architecture context
 2. Run `git log --oneline -5` to see recent changes
-3. Run `pytest tests/ -v` to verify all 201 tests pass before making changes
+3. Run `pytest tests/ -v` to verify all 247 tests pass before making changes
 
 ---
 

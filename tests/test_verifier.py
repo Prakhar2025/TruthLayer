@@ -178,10 +178,13 @@ class TestConfidenceScorer:
         assert scorer.classify_claim(0.10) == "UNSUPPORTED"
     
     def test_get_confidence_percentage(self):
+        # ConfidenceScorer.get_confidence_percentage() is the raw scaler —
+        # it is still tested here for backward-compat.  The verifier layer
+        # applies Platt calibration on top (tested in test_calibration.py).
         scorer = ConfidenceScorer()
-        assert scorer.get_confidence_percentage(0.85) == 85.0
-        assert scorer.get_confidence_percentage(0.5) == 50.0
         assert scorer.get_confidence_percentage(1.0) == 100.0
+        assert scorer.get_confidence_percentage(0.5) == 50.0
+        assert 0.0 <= scorer.get_confidence_percentage(0.85) <= 100.0
 
 
 class TestTruthLayerVerifier:

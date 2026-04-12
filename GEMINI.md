@@ -10,7 +10,7 @@
 When starting a new session, always:
 1. Read `CLAUDE.md` for full architecture context
 2. Run `git log --oneline -5` to see recent changes
-3. Run `pytest tests/ -v` to verify all 138 tests pass before making changes
+3. Run `pytest tests/ -v` to verify all 157 tests pass before making changes
 
 ---
 
@@ -102,4 +102,4 @@ Status: Embedding caching ✓, Document IDs ✓, Rate limiting ✓, 3 integratio
 | F1        | 90.79% | First time crossing 90% production barrier |
 | Accuracy  | 90.33% | |
 | Latency   | 925ms  | Avg end-to-end across 300 cases |
-| Tests     | 138    | All passing, zero regressions |
+| Tests     | 157    | All passing, zero regressions |

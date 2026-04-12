@@ -21,10 +21,14 @@ from src.verifier.entity_checker import (
     NEGATION_MISMATCH_PENALTY,
     SUPERLATIVE_VS_SPECIFIC,
     SUPERLATIVE_SWAP_PENALTY,
+    TEMPORAL_MISMATCH_PENALTY,
     _extract_number_unit_pairs,
     _numbers_contradict,
     _superlatives_contradict,
     _semantic_negation_contradict,
+    _extract_years,
+    _extract_relative_time_pairs,
+    _temporal_contradict,
 )
 
 
@@ -681,3 +685,131 @@ class TestContradictionEvidence:
         assert "severity" in parsed
         assert "penalty_applied" in parsed
 
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Temporal Contradiction Engine -- unit tests
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# 14 cases covering every code path in Signal 4:
+#   4a. Calendar year disjointness (TP and TN)
+#   4b. Relative-time magnitude mismatch (same unit, different value)
+#   4b. Same value, different unit ("5 years" vs "5 months")
+#   Faithful: shared year        -- must NOT fire
+#   Faithful: no dates           -- must NOT fire
+#   Faithful: matching durations -- must NOT fire
+#   Evidence fields, JSON serialization, CRITICAL severity (end-to-end)
+# ══════════════════════════════════════════════════════════════════════════════
+
+import json as _json_temporal
+
+
+class TestTemporalContradictionEngine:
+    '''Validates _temporal_contradict and Signal 4 wiring in compute_alignment_penalty.'''
+
+    # -- internal extraction helpers ------------------------------------------
+
+    def test_extract_years_correct_set(self):
+        result = _extract_years("Python 3.11 was released in 2022 and patched in 2023.")
+        assert result == frozenset({"2022", "2023"})
+
+    def test_extract_years_empty_when_no_dates(self):
+        assert _extract_years("The drug reduces inflammation.") == frozenset()
+
+    def test_extract_relative_time_normalises_plural(self):
+        result = _extract_relative_time_pairs("The retention period is 5 years.")
+        assert ("5", "yr") in result
+
+    def test_extract_relative_time_mixed_units(self):
+        result = _extract_relative_time_pairs("Wait 30 days and retry after 2 hours.")
+        assert ("30", "day") in result
+        assert ("2", "hr") in result
+
+    # -- _temporal_contradict: True Positive (must fire) ----------------------
+
+    def test_year_mismatch_fires(self):
+        '''4a TP: claim year 2020 vs source year 2019.'''
+        claim  = "The regulation was enacted in 2020."
+        source = "The regulation was enacted in 2019."
+        assert _temporal_contradict(claim, source) is True
+
+    def test_duration_magnitude_fires(self):
+        '''4b TP: same unit day, different values 90 vs 30.'''
+        claim  = "The notice period is 90 days."
+        source = "A 30-day notice period is required under the agreement."
+        assert _temporal_contradict(claim, source) is True
+
+    def test_same_value_different_unit_fires(self):
+        '''4b TP: 5 years vs 5 months -- same integer, different unit.'''
+        claim  = "The contract runs for 5 years."
+        source = "The contract runs for 5 months."
+        assert _temporal_contradict(claim, source) is True
+
+    # -- _temporal_contradict: True Negative (must NOT fire) ------------------
+
+    def test_shared_year_does_not_fire(self):
+        '''4a TN: both texts share year 2022.'''
+        claim  = "Python 3.11 was released in 2022."
+        source = "Python 3.11 was officially released on October 24, 2022."
+        assert _temporal_contradict(claim, source) is False
+
+    def test_no_dates_does_not_fire(self):
+        '''4a/4b TN: no temporal expressions on either side.'''
+        claim  = "The drug reduces inflammation."
+        source = "Clinical trials show the drug reduces inflammation significantly."
+        assert _temporal_contradict(claim, source) is False
+
+    def test_matching_duration_does_not_fire(self):
+        '''4b TN: both texts agree on 5 years.'''
+        claim  = "The warranty covers defects for 5 years."
+        source = "Products are warranted against defects for 5 years from purchase."
+        assert _temporal_contradict(claim, source) is False
+
+    # -- end-to-end: compute_alignment_penalty Signal 4 wiring ----------------
+
+    def test_signal4_year_mismatch_evidence(self):
+        '''4a end-to-end: year mismatch returns TEMPORAL_CONTRADICTION CRITICAL.'''
+        claim  = "The GDPR was adopted in 2014."
+        source = "The GDPR was adopted by the European Parliament in 2016."
+        penalty, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        assert evidence.signal == "TEMPORAL_CONTRADICTION"
+        assert evidence.severity == "CRITICAL"
+        assert evidence.penalty_applied == TEMPORAL_MISMATCH_PENALTY
+        assert "2014" in evidence.claim_fragment
+        assert "2016" in evidence.source_fragment
+
+    def test_signal4_duration_mismatch_evidence(self):
+        '''
+        4b end-to-end: temporal duration mismatch produces a CRITICAL contradiction.
+        90 days vs 30-day fires both NUMERICAL_MISMATCH (Signal 1) and
+        TEMPORAL_CONTRADICTION (Signal 4).  Both signals share penalty 0.35.
+        Assert any CRITICAL signal fires and penalty == TEMPORAL_MISMATCH_PENALTY.
+        '''
+        claim  = "The notice period is 90 days."
+        source = "A 30-day notice period is required under the agreement."
+        penalty, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        assert evidence.severity == "CRITICAL"
+        assert evidence.penalty_applied == TEMPORAL_MISMATCH_PENALTY
+
+    def test_signal4_faithful_year_silent(self):
+        '''End-to-end: faithful year match must NOT produce temporal evidence.'''
+        claim  = "Python 3.11 was released in 2022."
+        source = "Python 3.11 was officially released on October 24, 2022."
+        _, evidence = compute_alignment_penalty(claim, source)
+        if evidence is not None:
+            assert evidence.signal != "TEMPORAL_CONTRADICTION"
+
+    def test_signal4_evidence_json_serializable(self):
+        '''Signal 4 evidence.to_dict() must be cleanly JSON-serializable.'''
+        claim  = "The regulation was enacted in 2020."
+        source = "The regulation was enacted in 2019."
+        _, evidence = compute_alignment_penalty(claim, source)
+        assert evidence is not None
+        serialized = _json_temporal.dumps(evidence.to_dict())
+        parsed = _json_temporal.loads(serialized)
+        assert parsed["signal"] == "TEMPORAL_CONTRADICTION"
+        assert parsed["severity"] == "CRITICAL"
+        assert "explanation" in parsed
+        assert isinstance(parsed["penalty_applied"], float)

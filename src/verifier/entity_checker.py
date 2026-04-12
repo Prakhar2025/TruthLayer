@@ -40,7 +40,7 @@ from typing import FrozenSet, Literal, Optional, Set, Tuple
 # the API to return machine-readable evidence, not just a penalty float.
 #
 # Severity derivation is deterministic from the penalty constant:
-#   ≤ 0.35  →  CRITICAL  (NUMBER, SUPERLATIVE_SWAP — strongest signal)
+#   ≤ 0.35  →  CRITICAL  (NUMBER, SUPERLATIVE_SWAP, TEMPORAL — strongest signal)
 #   ≤ 0.38  →  HIGH      (NEGATION — strong signal)
 #   ≤ 0.50  →  MEDIUM    (SUPERLATIVE_VS_SPECIFIC — weaker signal)
 #   > 0.50  →  LOW       (reserved for future soft penalties)
@@ -51,6 +51,7 @@ SignalType = Literal[
     "SEMANTIC_ANTONYM",
     "SUPERLATIVE_SWAP",
     "SUPERLATIVE_VS_SPECIFIC",
+    "TEMPORAL_CONTRADICTION",
 ]
 
 
@@ -132,10 +133,11 @@ class ContradictionEvidence:
 #   0.998 × 0.38 = 0.379 < 0.40  ✓ for negation contradictions
 # SUPERLATIVE_VS_SPECIFIC is more conservative (absolute vs. specific is weaker
 # signal) — calibrated to push an 0.80 base below threshold: 0.80 × 0.50 = 0.40.
-NUMBER_MISMATCH_PENALTY: float = 0.35   # verified numeric (value, unit) mismatch
-NEGATION_MISMATCH_PENALTY: float = 0.38 # negation polarity differs
-SUPERLATIVE_SWAP_PENALTY: float = 0.35  # superlative polarity inverted
-SUPERLATIVE_VS_SPECIFIC: float = 0.50   # absolute term vs concrete limit
+NUMBER_MISMATCH_PENALTY: float = 0.35    # verified numeric (value, unit) mismatch
+NEGATION_MISMATCH_PENALTY: float = 0.38  # negation polarity differs
+SUPERLATIVE_SWAP_PENALTY: float = 0.35   # superlative polarity inverted
+SUPERLATIVE_VS_SPECIFIC: float = 0.50    # absolute term vs concrete limit
+TEMPORAL_MISMATCH_PENALTY: float = 0.35  # date / year / duration mismatch
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -849,6 +851,178 @@ def _semantic_negation_contradict(claim: str, source: str) -> bool:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 4.5  Temporal contradiction engine (Signal 4)
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# Date and year hallucinations are the most frequent factual error in enterprise
+# AI outputs — legal documents, clinical guidelines, regulatory filings all
+# pivot on specific years, months, and durations.
+#
+# Two sub-detectors run independently:
+#
+#   4a. Calendar Year Mismatch
+#       Extracts four-digit years in [1900, 2099] using a boundary-anchored
+#       pattern.  If the claim contains year(s) absent from the source's year
+#       set, and the source contains at least one year, a contradiction fires.
+#       Overlap guard: if claim and source share at least one year the context
+#       may be multi-event — we only fire when the claim's year set is fully
+#       disjoint from the source's year set.
+#
+#   4b. Relative-Time Quantity Mismatch
+#       Extracts (value, canonical_unit) pairs ("5 years" → (5, "yr"),
+#       "3 months" → (3, "mo")) using a dedicated regex separate from the
+#       general numeric extractor.  If the claim's duration differs from the
+#       source's duration on the SAME unit, a contradiction fires.
+#       Same-value / different-unit mismatch is also caught:
+#         "5 years" vs "5 months" → (5, "yr") ≠ (5, "mo") → fire.
+#
+# Design constraints honoured:
+#   - Zero external dependencies — stdlib `re` only.
+#   - All patterns compiled at module import time (no per-call compilation).
+#   - O(n) on text length — no NLP pipeline.
+#   - Penalty = TEMPORAL_MISMATCH_PENALTY = 0.35 → CRITICAL severity.
+
+# ── 4a: Calendar year extraction ────────────────────────────────────────────
+# Matches four-digit years in the plausible range [1900, 2099].
+# Word-boundary anchors ensure "19001" does not match as "1900".
+_YEAR_RE: re.Pattern = re.compile(
+    r"\b((?:19|20)\d{2})\b"
+)
+
+
+def _extract_years(text: str) -> frozenset:
+    """
+    Return the set of four-digit calendar years found in text.
+
+    Only years in the range [1900, 2099] are matched.  The pattern is
+    compiled once at module level; this function merely calls .findall().
+
+    Example:
+        "Released in 2022 and updated in 2023." → frozenset({'2022', '2023'})
+        "No dates here."                        → frozenset()
+    """
+    return frozenset(_YEAR_RE.findall(text))
+
+
+# ── 4b: Relative-time quantity extraction ───────────────────────────────────
+# Matches patterns like "5 years", "3 months", "24 hours", "10 days".
+# The canonical unit token mirrors _TIME_UNITS from Section 3 so that
+# "5 years" and "5 year" both normalise to ("5", "yr").
+_RELATIVE_TIME_RE: re.Pattern = re.compile(
+    r"\b(\d+)[-\s](years?|months?|weeks?|days?|hours?|minutes?|seconds?|yrs?)"
+    r"|\b(\d+(?:\.\d+)?)\s+(years?|months?|weeks?|days?|hours?|minutes?|seconds?|yrs?)\b",
+    re.IGNORECASE,
+)
+
+# Maps the capture group from _RELATIVE_TIME_RE to canonical unit tokens.
+_RELATIVE_TIME_UNIT_MAP: dict[str, str] = {
+    "year":   "yr", "years":   "yr", "yr":  "yr", "yrs": "yr",
+    "month":  "mo", "months":  "mo",
+    "week":   "wk", "weeks":   "wk",
+    "day":    "day", "days":   "day",
+    "hour":   "hr", "hours":   "hr",
+    "minute": "min", "minutes": "min",
+    "second": "sec", "seconds": "sec",
+}
+
+
+def _extract_relative_time_pairs(text: str) -> frozenset:
+    """
+    Extract (value_str, canonical_unit) pairs from relative-time expressions.
+
+    Examples:
+        "The term is 5 years."       → frozenset({('5', 'yr')})
+        "Retention is 24 months."    → frozenset({('24', 'mo')})
+        "Lock-up is 6 months."       → frozenset({('6', 'mo')})
+        "Valid for 1 year."          → frozenset({('1', 'yr')})
+    """
+    pairs: set = set()
+    for match in _RELATIVE_TIME_RE.finditer(text):
+        # Group layout: hyphenated form uses groups 1+2; spaced form uses groups 3+4.
+        if match.group(1) is not None:   # hyphenated: (\d+)[-](unit)
+            value    = match.group(1)
+            raw_unit = match.group(2).lower()
+        else:                            # spaced: (\d+) (unit)
+            value    = match.group(3)
+            raw_unit = match.group(4).lower()
+        raw_no_plural = raw_unit.rstrip("s")  # strip trailing plural 's'
+        canonical = _RELATIVE_TIME_UNIT_MAP.get(
+            raw_unit,
+            _RELATIVE_TIME_UNIT_MAP.get(raw_no_plural, raw_no_plural),
+        )
+        pairs.add((value, canonical))
+    return frozenset(pairs)
+
+
+def _temporal_contradict(claim: str, source: str) -> bool:
+    """
+    Return True if a temporal contradiction is detected between claim and source.
+
+    Two independent checks are performed; either is sufficient to return True:
+
+    Check 4a — Calendar year mismatch:
+        The claim's year set must be FULLY DISJOINT from the source's year set,
+        AND the source must contain at least one year.  The disjointness
+        requirement prevents false fires in multi-event timelines where both
+        texts legitimately reference different years in different contexts.
+
+    Check 4b — Relative-time quantity mismatch:
+        The claim's (value, unit) duration pairs are compared against the
+        source's.  A mismatch fires when:
+          - The same numeric value appears with different units, OR
+          - Different numeric values appear with the same units.
+        The latter case (10 years vs 5 years) is covered because the sets are
+        disjoint when values differ and units are shared.
+
+    Args:
+        claim:  The AI-generated claim string.
+        source: The best-matching source fragment.
+
+    Returns:
+        True  → temporal contradiction detected.
+        False → no temporal contradiction.
+    """
+    # ── 4a: Calendar year disjointness ───────────────────────────────────────
+    claim_years  = _extract_years(claim)
+    source_years = _extract_years(source)
+
+    if claim_years and source_years and claim_years.isdisjoint(source_years):
+        # Both texts reference years, and they share none — genuine mismatch.
+        return True
+
+    # -- 4b: Relative-time quantity clash -------------------------------------
+    claim_durations  = _extract_relative_time_pairs(claim)
+    source_durations = _extract_relative_time_pairs(source)
+
+    if not claim_durations or not source_durations:
+        return False  # one side has no relative-time expression -- cannot compare
+
+    # Case A: same unit, different value  (e.g. 10 yr vs 5 yr, 90 day vs 30 day)
+    claim_units  = {u for _, u in claim_durations}
+    source_units = {u for _, u in source_durations}
+    shared_units = claim_units & source_units
+
+    for unit in shared_units:
+        claim_vals  = {v for v, u in claim_durations  if u == unit}
+        source_vals = {v for v, u in source_durations if u == unit}
+        if claim_vals != source_vals:
+            return True  # same unit, different magnitude -- contradiction
+
+    # Case B: same value, different unit  (e.g. 5 yr vs 5 mo)
+    claim_values  = {v for v, _ in claim_durations}
+    source_values = {v for v, _ in source_durations}
+    shared_values = claim_values & source_values
+
+    for val in shared_values:
+        claim_units_for_val  = {u for v, u in claim_durations  if v == val}
+        source_units_for_val = {u for v, u in source_durations if v == val}
+        if claim_units_for_val.isdisjoint(source_units_for_val):
+            return True  # same number, different time unit -- contradiction
+
+    return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 5  Legacy helpers (public API — unchanged signatures)
 # ═══════════════════════════════════════════════════════════════════════════════
 # ── Module-level absolute-superlative pattern ────────────────────────────────
@@ -882,7 +1056,7 @@ def compute_alignment_penalty(
     of factual contradiction between a claim and its best-matching source.
     Also returns structured evidence identifying which detector fired and why.
 
-    Three contradiction signals are evaluated independently; the minimum
+    Four contradiction signals are evaluated independently; the minimum
     (most restrictive) penalty and its corresponding evidence are returned.
 
     Signal 1 - Numerical mismatch (unit-aware)
@@ -901,6 +1075,12 @@ def compute_alignment_penalty(
         fastest/unlimited/...) whose antonym appears in the source.
         Catches: "highest vs lowest", "most vs least", "unlimited vs limited"
         Also fires for absolute vs specific: "unlimited" vs "100,000 calls"
+
+    Signal 4 - Temporal contradiction
+        a) Calendar year mismatch: claim and source reference disjoint year sets.
+        b) Relative-time quantity mismatch: claim and source disagree on duration
+           for the same time unit ("5 years" vs "10 years", "5 years" vs "5 months").
+        Penalty = TEMPORAL_MISMATCH_PENALTY = 0.35 (CRITICAL).
 
     Args:
         claim:          The AI-generated claim text.
@@ -1067,6 +1247,50 @@ def compute_alignment_penalty(
                 f"Claim uses absolute term '{claim_frag}'; "
                 f"source specifies a concrete limit ({src_frag})."
             ),
+        )
+        if sig_penalty <= penalty:
+            penalty  = sig_penalty
+            evidence = sig_evidence
+
+    # ── Signal 4: Temporal contradiction (year mismatch / duration mismatch) ──
+    if _temporal_contradict(claim, matched_source):
+        sig_penalty = TEMPORAL_MISMATCH_PENALTY
+
+        # Surface the first specific fragment pair for evidence.
+        # Priority: year mismatch (most legible) over duration mismatch.
+        claim_years  = _extract_years(claim)
+        source_years = _extract_years(matched_source)
+
+        if claim_years and source_years and claim_years.isdisjoint(source_years):
+            # Year disjointness case — show the conflicting year from each side.
+            claim_frag = next(iter(sorted(claim_years)))
+            src_frag   = next(iter(sorted(source_years)))
+            explanation = (
+                f"Claim references year {claim_frag}; "
+                f"source specifies year {src_frag}. Calendar year mismatch."
+            )
+        else:
+            # Relative-time duration case — show the conflicting (value, unit) pair.
+            claim_durations  = _extract_relative_time_pairs(claim)
+            source_durations = _extract_relative_time_pairs(matched_source)
+            claim_frag = ", ".join(
+                f"{v} {u}" for v, u in sorted(claim_durations)
+            ) if claim_durations else ""
+            src_frag = ", ".join(
+                f"{v} {u}" for v, u in sorted(source_durations)
+            ) if source_durations else ""
+            explanation = (
+                f"Claim states duration {claim_frag!r}; "
+                f"source specifies {src_frag!r}. Temporal quantity mismatch."
+            )
+
+        sig_evidence = ContradictionEvidence(
+            signal          = "TEMPORAL_CONTRADICTION",
+            severity        = ContradictionEvidence._severity_from_penalty(sig_penalty),
+            penalty_applied = sig_penalty,
+            claim_fragment  = claim_frag,
+            source_fragment = src_frag,
+            explanation     = explanation,
         )
         if sig_penalty <= penalty:
             penalty  = sig_penalty

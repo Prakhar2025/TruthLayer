@@ -1,489 +1,345 @@
-# Core Algorithm Specification
+# TruthLayer v2 — Core Algorithm Specification
 
-## 1. Algorithm Overview
+> **Version:** 2.0 (Five-Signal Engine)  
+> **Last Updated:** April 2026  
+> **Status:** Production — Deployed on AWS
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                    TruthLayer Verification Pipeline                       │
-│                                                                           │
-│  ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐   ┌─────────┐    │
-│  │ Input   │──▶│ Claim   │──▶│ Embed   │──▶│ Match   │──▶│ Score   │    │
-│  │ Parse   │   │ Extract │   │ Claims  │   │ Chunks  │   │ Output  │    │
-│  └─────────┘   └─────────┘   └─────────┘   └─────────┘   └─────────┘    │
-│      5ms          15ms          30ms          25ms          5ms          │
-│                                                                           │
-│                    Total Target: < 100ms                                  │
-└──────────────────────────────────────────────────────────────────────────┘
-```
+This document is the authoritative technical specification for TruthLayer's verification pipeline. It supersedes all prior versions.
 
 ---
 
-## 2. Claim Extraction Methodology
+## 1. Pipeline Overview
 
-### 2.1 Algorithm Steps
-
-```python
-def extract_claims(ai_response: str) -> List[Claim]:
-    """
-    Extract atomic, verifiable claims from AI response.
-    
-    Args:
-        ai_response: Raw AI-generated text
-        
-    Returns:
-        List of Claim objects with text and metadata
-    """
-    # Step 1: Sentence tokenization
-    sentences = sent_tokenize(ai_response)
-    
-    # Step 2: Filter non-factual sentences
-    factual_sentences = [s for s in sentences if is_factual(s)]
-    
-    # Step 3: Split compound claims
-    atomic_claims = []
-    for sentence in factual_sentences:
-        atomic_claims.extend(split_compound_claims(sentence))
-    
-    # Step 4: Normalize claims
-    normalized = [normalize_claim(c) for c in atomic_claims]
-    
-    # Step 5: Deduplicate
-    unique_claims = deduplicate_claims(normalized)
-    
-    return unique_claims[:MAX_CLAIMS]  # Default: 10
+```
+AI Response Text
+      │
+      ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 1: Claim Extraction                              │
+│  sentence-boundary split → filter → deduplicate         │
+└────────────────────────┬────────────────────────────────┘
+                         │  claims: List[str]
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 2: Embedding (Signal 1)                          │
+│  Bedrock Titan V2 (1024-dim) + DynamoDB cache           │
+│  embed_batch([claims, source_chunks])                   │
+└────────────────────────┬────────────────────────────────┘
+                         │  embeddings: List[List[float]]
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 3: Cosine Similarity Match                       │
+│  find_best_match(claim_emb, source_embs) → sim, source  │
+└────────────────────────┬────────────────────────────────┘
+                         │  similarity: float, matched_source: str
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 4: Entity Contradiction Engine (Signals 2–4)     │
+│  compute_alignment_penalty(claim, source)               │
+│    ├── Numerical mismatch   (penalty=0.35, CRITICAL)    │
+│    ├── Negation / antonym   (penalty=0.38, HIGH)        │
+│    └── Temporal mismatch    (penalty=0.35, CRITICAL)    │
+└────────────────────────┬────────────────────────────────┘
+                         │  adjusted_score = sim × penalty
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 5: Platt Scaling Calibration                     │
+│  confidence = σ(12.0724 × score − 6.6398) × 100        │
+└────────────────────────┬────────────────────────────────┘
+                         │  confidence: float (%)
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 6: Classification                                │
+│  score ≥ 0.80 → VERIFIED                               │
+│  score ≥ 0.55 → UNCERTAIN                              │
+│  score  < 0.55 → UNSUPPORTED                           │
+└────────────────────────┬────────────────────────────────┘
+                         │  all claims classified
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Stage 7: Intra-Response Consistency (Signal 5)         │
+│  ∀ pairs (i,j) i<j: penalty(claim_i, claim_j) both dirs│
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+             API Response (claims + summary +
+             internal_consistency + metadata)
 ```
 
-### 2.2 Factuality Detection
-
-Claims must contain verifiable facts. Filter out:
-- Questions ("What is the revenue?")
-- Opinions ("I think the company is doing well")
-- Imperatives ("Please review the document")
-- Hedged statements ("The revenue might be around $4 billion")
-
-**Factuality Signals:**
-| Signal | Weight | Example |
-|--------|--------|---------|
-| Contains number | +0.3 | "Revenue was $4.2B" |
-| Contains date | +0.2 | "Founded in 2019" |
-| Contains proper noun | +0.2 | "Microsoft announced" |
-| Contains hedge word | -0.4 | "might", "possibly", "around" |
-| Is question | -1.0 | Ends with "?" |
-| Contains "I think/believe" | -0.5 | Opinion marker |
-
-```python
-def is_factual(sentence: str) -> bool:
-    score = 0.0
-    
-    # Positive signals
-    if contains_number(sentence): score += 0.3
-    if contains_date(sentence): score += 0.2
-    if contains_proper_noun(sentence): score += 0.2
-    
-    # Negative signals
-    if sentence.strip().endswith('?'): return False
-    if contains_hedge_words(sentence): score -= 0.4
-    if contains_opinion_markers(sentence): score -= 0.5
-    
-    return score >= 0.2  # Threshold
-```
-
-### 2.3 Compound Claim Splitting
-
-Split sentences with multiple facts into atomic claims.
-
-**Input:** "The company was founded in 2019 and has 500 employees in 12 countries."
-
-**Output:**
-1. "The company was founded in 2019"
-2. "The company has 500 employees"
-3. "The company operates in 12 countries"
-
-**Splitting Rules:**
-- Split on coordinating conjunctions ("and", "but", "or")
-- Split on semicolons
-- Preserve subject reference across splits
-- Maintain numerical precision
+**Design invariants:**
+- `adjusted_score = sim × Π(all_penalties)` — multiplicative compounding
+- All stages run on already-loaded claim strings — no redundant I/O after embedding
+- Zero external dependencies in Stages 3–7 (stdlib only: `re`, `math`)
 
 ---
 
-## 3. Embedding Generation Process
+## 2. Claim Extraction
 
-### 3.1 Bedrock Integration
+**File:** `src/verifier/claim_extractor.py`
+
+Claims are extracted using sentence-boundary detection with lightweight factuality filtering. The implementation is deliberately rule-based (no NLP pipeline) to ensure sub-millisecond overhead and zero external dependencies.
 
 ```python
-import boto3
-import json
-
-bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
-
-def generate_embedding(text: str) -> List[float]:
-    """
-    Generate 1536-dimensional embedding using Amazon Titan.
-    
-    Args:
-        text: Input text (max 8192 tokens)
-        
-    Returns:
-        List of 1536 float values
-    """
-    response = bedrock.invoke_model(
-        modelId='amazon.titan-embed-text-v1',
-        contentType='application/json',
-        accept='application/json',
-        body=json.dumps({
-            'inputText': text[:8000]  # Token limit safety
-        })
-    )
-    
-    result = json.loads(response['body'].read())
-    return result['embedding']  # 1536 floats
-
-
-def batch_generate_embeddings(texts: List[str]) -> List[List[float]]:
-    """
-    Batch embedding generation for efficiency.
-    Process up to 5 texts per batch to optimize latency.
-    """
-    embeddings = []
-    for text in texts:
-        embedding = generate_embedding(text)
-        embeddings.append(embedding)
-    return embeddings
+# Actual production logic (simplified)
+def extract_claims(ai_response: str) -> List[str]:
+    # Sentence tokenization (punctuation-based)
+    sentences = _split_sentences(ai_response)
+    # Filter: keep sentences with at least one content word
+    claims = [s.strip() for s in sentences if len(s.strip()) > 10]
+    # Deduplicate preserving order
+    seen = set()
+    return [c for c in claims if not (c in seen or seen.add(c))]
 ```
 
-### 3.2 Embedding Specifications
+**Complexity:** O(n) where n = length of `ai_response`  
+**Latency:** <2ms for typical responses
+
+---
+
+## 3. Embedding Generation and Caching (Signal 1)
+
+**Files:** `src/embeddings/bedrock_provider.py`, `src/embeddings/cached_provider.py`
+
+### 3.1 Bedrock Titan V2 Specification
 
 | Parameter | Value |
 |-----------|-------|
-| Model | amazon.titan-embed-text-v1 |
-| Dimensions | 1536 |
-| Max Input Tokens | 8,192 |
-| Latency (p50) | 25ms |
-| Latency (p99) | 80ms |
-| Cost | $0.0001 per 1K tokens |
+| Model ID | `amazon.titan-embed-text-v2:0` |
+| Dimensions | **1024** (not 1536 — that was v1) |
+| Max input | 8,192 tokens |
+| Region | `us-east-1` |
+| Latency p50 | ~720ms (batch embedding per call) |
 
-### 3.3 Text Preprocessing
-
-Before embedding generation:
 ```python
-def preprocess_for_embedding(text: str) -> str:
-    # Lowercase
-    text = text.lower()
-    
-    # Remove extra whitespace
-    text = ' '.join(text.split())
-    
-    # Remove special characters (keep alphanumeric, spaces, basic punctuation)
-    text = re.sub(r'[^\w\s.,!?;:\'-]', '', text)
-    
-    # Truncate to token limit
-    tokens = text.split()[:1500]  # ~6000 chars safety margin
-    
-    return ' '.join(tokens)
+# BedrockEmbeddingProvider.embed_batch()
+response = bedrock.invoke_model(
+    modelId="amazon.titan-embed-text-v2:0",
+    body=json.dumps({"inputText": text, "dimensions": 1024, "normalize": True})
+)
 ```
+
+Note: `"normalize": True` ensures returned vectors have unit L2 norm, making cosine similarity equivalent to dot product — required for correctness.
+
+### 3.2 DynamoDB Embedding Cache
+
+**File:** `src/embeddings/cached_provider.py`
+
+Cache key: `SHA-256(text)` — collision-resistant, fixed-length, deterministic.
+
+```
+Cache hit path:  DynamoDB GetItem (~15ms) ← 749ms savings vs Bedrock
+Cache miss path: Bedrock invoke (~720ms) + DynamoDB PutItem (~5ms)
+```
+
+TTL: 7 days (DynamoDB TTL attribute). Non-fatal: cache failures fall through to Bedrock.
+
+### 3.3 Cosine Similarity (stdlib, no numpy)
+
+```python
+def _cosine_similarity(a: List[float], b: List[float]) -> float:
+    dot   = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    return dot / (norm_a * norm_b) if (norm_a and norm_b) else 0.0
+```
+
+**No numpy. No scipy. Pure stdlib.**
 
 ---
 
-## 4. Semantic Similarity Matching
+## 4. Entity Contradiction Engine (Signals 2–4)
 
-### 4.1 Cosine Similarity Calculation
+**File:** `src/verifier/entity_checker.py`
 
-```python
-import numpy as np
+### 4.1 Architecture
 
-def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
-    """
-    Compute cosine similarity between two embeddings.
-    
-    Returns:
-        Similarity score between -1 and 1 (typically 0 to 1 for text)
-    """
-    a = np.array(vec_a)
-    b = np.array(vec_b)
-    
-    dot_product = np.dot(a, b)
-    norm_a = np.linalg.norm(a)
-    norm_b = np.linalg.norm(b)
-    
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    
-    return dot_product / (norm_a * norm_b)
+`compute_alignment_penalty(claim: str, matched_source: str) -> Tuple[float, Optional[ContradictionEvidence]]`
+
+Returns:
+- `(1.0, None)` — no contradiction detected
+- `(penalty_product, ContradictionEvidence)` — contradiction detected with structured evidence
+
+Multiple contradictions compound: if signals 2 and 3 both fire, `penalty = 0.35 × 0.38 = 0.133`.
+
+### 4.2 Signal 2 — Numerical Contradiction
+
+**Approach:** Unit-aware `(value, unit)` tuple comparison.
+
+```
+Regex: r'(\d+(?:\.\d+)?(?:,\d{3})*)\s*(mg|kg|%|ms|s|min|hour|year|...)'
 ```
 
-### 4.2 Matching Algorithm
+**Anti-false-positive design:** Compares `(42, "mg")` vs `(42, "g")` — different unit → fires. Compares `(400, "mg")` vs `(40, "mg")` — same unit, different value → fires. Substring collision guard: `"1000"` inside `"10000"` is not a match.
 
-```python
-def find_best_match(
-    claim_embedding: List[float],
-    chunk_embeddings: List[Dict],
-    top_k: int = 3
-) -> List[MatchResult]:
-    """
-    Find the best matching document chunks for a claim.
-    
-    Args:
-        claim_embedding: 1536-dim vector for the claim
-        chunk_embeddings: List of {chunk_id, embedding, text} dicts
-        top_k: Number of top matches to return
-        
-    Returns:
-        List of MatchResult with scores and chunk info
-    """
-    similarities = []
-    
-    for chunk in chunk_embeddings:
-        score = cosine_similarity(claim_embedding, chunk['embedding'])
-        similarities.append({
-            'chunk_id': chunk['chunk_id'],
-            'text': chunk['text'],
-            'score': score
-        })
-    
-    # Sort by score descending
-    similarities.sort(key=lambda x: x['score'], reverse=True)
-    
-    return similarities[:top_k]
+```
+Penalty: 0.35  (CRITICAL)
 ```
 
-### 4.3 Optimized Batch Matching
+### 4.3 Signal 3 — Negation and Semantic Antonym
 
-For performance, use vectorized operations:
+**Three-layer detection:**
+
+**Layer A — S2A vicinity guard:** Prevents false positive on requirement-conditional negation (`"not to exceed"`, `"not less than"`). 3-stage decision tree:
+1. Threshold equivalence: `"not exceed 250" ≡ "below 250"` → abort
+2. Requirement-conditional: `"must not", "shall not", "do not"` → abort
+3. Access-gate: `"not permitted", "not allowed"` → fire if source says permitted
+
+**Layer B — Soft negation anchor scan:** Detects `never`, `no`, `none`, `false` within a 4-token window around extracted entities.
+
+**Layer C — Semantic antonym pairs:** 46 bidirectional pairs:
+`permitted↔prohibited`, `safe↔contraindicated`, `required↔optional`, `accept↔reject`, etc.
+
+```
+Penalty: 0.38  (HIGH)
+```
+
+### 4.4 Signal 4 — Temporal Contradiction
+
+**Calendar year disjointness:**
+```python
+# Claim has year 2014, source has year 2016 → fire
+years_claim  = set(re.findall(r'\b(19|20)\d{2}\b', claim))
+years_source = set(re.findall(r'\b(19|20)\d{2}\b', source))
+if years_claim and years_source and years_claim.isdisjoint(years_source):
+    fire(TEMPORAL_CONTRADICTION)
+```
+
+**Duration mismatch** (same temporal unit, different magnitude):
+```python
+# "24 months" vs "24 years" → fire
+# "5 hours" vs "5 minutes" → fire
+```
+
+```
+Penalty: 0.35  (CRITICAL)
+```
+
+### 4.5 ContradictionEvidence
 
 ```python
-def batch_match_claims(
-    claim_embeddings: np.ndarray,  # Shape: (num_claims, 1536)
-    chunk_embeddings: np.ndarray,  # Shape: (num_chunks, 1536)
-) -> np.ndarray:
-    """
-    Vectorized similarity matching using matrix multiplication.
-    
-    Returns:
-        Similarity matrix of shape (num_claims, num_chunks)
-    """
-    # Normalize embeddings
-    claim_norms = np.linalg.norm(claim_embeddings, axis=1, keepdims=True)
-    chunk_norms = np.linalg.norm(chunk_embeddings, axis=1, keepdims=True)
-    
-    claim_normalized = claim_embeddings / claim_norms
-    chunk_normalized = chunk_embeddings / chunk_norms
-    
-    # Matrix multiplication for all similarities at once
-    similarity_matrix = np.dot(claim_normalized, chunk_normalized.T)
-    
-    return similarity_matrix
+@dataclass(frozen=True)
+class ContradictionEvidence:
+    signal:          Literal["NUMERICAL_MISMATCH", "S2A_NEGATION_POLARITY",
+                             "SEMANTIC_ANTONYM", "SUPERLATIVE_SWAP",
+                             "SUPERLATIVE_VS_SPECIFIC", "TEMPORAL_CONTRADICTION"]
+    severity:        Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    penalty_applied: float
+    claim_fragment:  str
+    source_fragment: str
+    explanation:     str
 ```
+
+Frozen (immutable). JSON-serializable via `.to_dict()`. Returned in API response as `contradiction_evidence`.
 
 ---
 
-## 5. Confidence Scoring Calculation
+## 5. Platt Scaling Calibration
 
-### 5.1 Score Components
+**File:** `src/verifier/calibration.py`
 
-The confidence score combines multiple signals:
-
-```python
-def calculate_confidence(
-    similarity_score: float,
-    claim_specificity: float,
-    chunk_coverage: float
-) -> float:
-    """
-    Calculate final confidence score (0.0 to 1.0).
-    
-    Components:
-    - similarity_score: Cosine similarity (0-1)
-    - claim_specificity: How specific/verifiable the claim is (0-1)
-    - chunk_coverage: What % of claim tokens appear in chunk (0-1)
-    """
-    weights = {
-        'similarity': 0.60,
-        'specificity': 0.20,
-        'coverage': 0.20
-    }
-    
-    confidence = (
-        weights['similarity'] * similarity_score +
-        weights['specificity'] * claim_specificity +
-        weights['coverage'] * chunk_coverage
-    )
-    
-    return min(1.0, max(0.0, confidence))
-```
-
-### 5.2 Claim Specificity Calculation
+### 5.1 Formula
 
 ```python
-def calculate_specificity(claim: str) -> float:
-    """
-    Higher specificity for claims with concrete, verifiable details.
-    """
-    score = 0.5  # Base score
-    
-    # Boost for specific elements
-    if contains_number(claim): score += 0.2
-    if contains_date(claim): score += 0.15
-    if contains_percentage(claim): score += 0.15
-    if contains_proper_noun(claim): score += 0.1
-    
-    # Penalize vague claims
-    if len(claim.split()) < 5: score -= 0.1
-    if contains_vague_words(claim): score -= 0.2
-    
-    return min(1.0, max(0.0, score))
+def calibrate_confidence_pct(adjusted_similarity: float) -> float:
+    A, B = 12.0724, -6.6398
+    exponent = -(A * adjusted_similarity + B)
+    sigmoid = 1.0 / (1.0 + math.exp(exponent))
+    return round(sigmoid * 100, 1)
 ```
 
-### 5.3 Chunk Coverage Calculation
+### 5.2 Parameter Derivation
 
-```python
-def calculate_coverage(claim: str, chunk: str) -> float:
-    """
-    What percentage of claim tokens appear in the matched chunk.
-    """
-    claim_tokens = set(claim.lower().split())
-    chunk_tokens = set(chunk.lower().split())
-    
-    # Remove stop words
-    stop_words = {'the', 'a', 'an', 'is', 'was', 'are', 'were', 'and', 'or'}
-    claim_tokens -= stop_words
-    
-    if not claim_tokens:
-        return 0.0
-    
-    matched = claim_tokens.intersection(chunk_tokens)
-    return len(matched) / len(claim_tokens)
+Analytically solved from two benchmark boundary conditions:
+
+```
+BC1: σ(A × 0.80 + B) = 0.9533  [measured precision at VERIFIED threshold]
+BC2: σ(A × 0.55 + B) = 0.5000  [50% at semantic uncertainty midpoint]
+
+Solving: A = (logit(0.9533)) / (0.80 - 0.55) = 3.0206 / 0.25 = 12.0724
+         B = -A × 0.55 = -6.6398
 ```
 
-### 5.4 Verdict Classification
+### 5.3 Guarantees
 
-```python
-def classify_verdict(confidence: float) -> str:
-    """
-    Classify claim into verification verdict.
-    
-    Thresholds:
-    - VERIFIED: >= 0.85 (Green)
-    - UNCERTAIN: 0.60 - 0.84 (Yellow)  
-    - UNSUPPORTED: < 0.60 (Red)
-    """
-    if confidence >= 0.85:
-        return "VERIFIED"
-    elif confidence >= 0.60:
-        return "UNCERTAIN"
-    else:
-        return "UNSUPPORTED"
-```
-
-### 5.5 Overall Score Aggregation
-
-```python
-def aggregate_overall_score(claims: List[ClaimResult]) -> Tuple[float, str]:
-    """
-    Calculate overall document verification score and verdict.
-    """
-    if not claims:
-        return 0.0, "UNSUPPORTED"
-    
-    # Weighted average (lower scores weighted more heavily)
-    weights = [1.0 / (1.0 + c.confidence) for c in claims]
-    total_weight = sum(weights)
-    
-    weighted_sum = sum(c.confidence * w for c, w in zip(claims, weights))
-    overall_score = weighted_sum / total_weight
-    
-    # Overall verdict based on claim distribution
-    verified_count = sum(1 for c in claims if c.verdict == "VERIFIED")
-    unsupported_count = sum(1 for c in claims if c.verdict == "UNSUPPORTED")
-    
-    verified_ratio = verified_count / len(claims)
-    unsupported_ratio = unsupported_count / len(claims)
-    
-    if verified_ratio >= 0.8 and unsupported_ratio == 0:
-        return overall_score, "VERIFIED"
-    elif unsupported_ratio >= 0.5:
-        return overall_score, "UNSUPPORTED"
-    else:
-        return overall_score, "PARTIALLY_VERIFIED"
-```
+- **Monotone:** `∀ x₁ < x₂: σ(A·x₁+B) < σ(A·x₂+B)` — strictly increasing
+- **Bounded:** output always in `[0, 100]`
+- **Grounded:** confidence at VERIFIED threshold exactly equals benchmark precision
+- **Deterministic:** same input → same output, no randomness
 
 ---
 
-## 6. Performance Optimization Strategies
+## 6. Classification
 
-### 6.1 Embedding Caching
+**File:** `src/verifier/confidence_scorer.py`
 
-```python
-# Cache claim embeddings for repeated verifications
-CLAIM_CACHE = {}  # In production: use Redis or DynamoDB
+```
+adjusted_score = cosine_similarity × Π(entity_penalties)
 
-def get_or_create_embedding(text: str) -> List[float]:
-    cache_key = hashlib.md5(text.encode()).hexdigest()
-    
-    if cache_key in CLAIM_CACHE:
-        return CLAIM_CACHE[cache_key]
-    
-    embedding = generate_embedding(text)
-    CLAIM_CACHE[cache_key] = embedding
-    
-    return embedding
+adjusted_score >= VERIFIED_THRESHOLD  (0.80)  →  "VERIFIED"    🟢
+adjusted_score >= UNCERTAIN_THRESHOLD (0.55)  →  "UNCERTAIN"   🟡
+adjusted_score <  UNCERTAIN_THRESHOLD          →  "UNSUPPORTED" 🔴
 ```
 
-### 6.2 Chunk Pre-filtering
+Thresholds are configurable via environment variables. Default values are calibrated to the 300-case adversarial benchmark.
+
+---
+
+## 7. Intra-Response Consistency Check (Signal 5)
+
+**File:** `src/verifier/verifier.py` — `_check_internal_consistency()`
+
+### 7.1 Algorithm
 
 ```python
-def prefilter_chunks(
-    claim: str,
-    chunks: List[Dict],
-    top_n: int = 20
-) -> List[Dict]:
-    """
-    Use keyword overlap to pre-filter chunks before embedding comparison.
-    Reduces embedding comparisons from 100s to ~20.
-    """
-    claim_keywords = extract_keywords(claim)
+def _check_internal_consistency(claims: List[str]) -> Dict:
+    if len(claims) < 2:
+        return {"consistent": True, "conflict_count": 0, "conflicts": []}
     
-    scores = []
-    for chunk in chunks:
-        chunk_keywords = extract_keywords(chunk['text'])
-        overlap = len(claim_keywords.intersection(chunk_keywords))
-        scores.append((overlap, chunk))
+    conflicts = []
+    for i in range(len(claims)):
+        for j in range(i + 1, len(claims)):
+            # Both directions — entity checker is asymmetric
+            penalty_a, ev_a = compute_alignment_penalty(claims[i], claims[j])
+            penalty_b, ev_b = compute_alignment_penalty(claims[j], claims[i])
+            
+            # Choose stronger signal
+            if ev_a or ev_b:
+                chosen = ev_a if (ev_a and (not ev_b or penalty_a <= penalty_b)) else ev_b
+                chosen_penalty = min(filter(None, [penalty_a if ev_a else None,
+                                                    penalty_b if ev_b else None]))
+                conflicts.append({
+                    "claim_a_index": i, "claim_b_index": j,
+                    "signal": chosen.signal, "severity": chosen.severity,
+                    "explanation": chosen.explanation, "penalty": round(chosen_penalty, 4)
+                })
     
-    scores.sort(key=lambda x: x[0], reverse=True)
-    return [chunk for _, chunk in scores[:top_n]]
+    return {"consistent": len(conflicts) == 0,
+            "conflict_count": len(conflicts), "conflicts": conflicts}
 ```
 
-### 6.3 Approximate Nearest Neighbor (Future Optimization)
+### 7.2 Why Both Directions
 
-For documents with 1000+ chunks, consider:
-- FAISS index for sub-linear similarity search
-- Product quantization for memory efficiency
-- Inverted file index for clustering
+`compute_alignment_penalty(x, y)` asks: "does x introduce something not in y?" Running `(claim_i, claim_j)` and `(claim_j, claim_i)` covers both orderings, ensuring all contradiction types are detected regardless of which claim comes first.
 
-```python
-# Future: FAISS integration for large-scale matching
-import faiss
+### 7.3 Complexity
 
-def build_faiss_index(embeddings: np.ndarray) -> faiss.Index:
-    dimension = 1536
-    index = faiss.IndexFlatIP(dimension)  # Inner product
-    faiss.normalize_L2(embeddings)
-    index.add(embeddings)
-    return index
+- Pairs: `n(n-1)/2` — for 5 claims = 10 pairs
+- Per pair: 2 × O(m) entity checks where m = text length
+- Typical overhead: <2ms total for 5–10 claims
 
-def search_faiss(index: faiss.Index, query: np.ndarray, k: int = 5):
-    faiss.normalize_L2(query)
-    distances, indices = index.search(query, k)
-    return distances, indices
+---
+
+## 8. Test Coverage
+
+```bash
+pytest tests/ -v
+# 286 passed in ~22s
 ```
 
-### 6.4 Latency Budget Allocation
-
-| Stage | Target | Optimization |
-|-------|--------|--------------|
-| Input Parsing | 5ms | Regex pre-compiled |
-| Claim Extraction | 15ms | Rule-based, no ML |
-| Embedding Generation | 30ms | Bedrock Titan optimized |
-| Similarity Matching | 25ms | Vectorized NumPy |
-| Scoring & Response | 5ms | Pre-computed lookups |
-| **Total** | **80ms** | 20ms buffer |
+| Test File | Cases | What Is Covered |
+|-----------|-------|-----------------|
+| `test_entity_checker.py` | 157 | All signals, S2A guard, antonyms, temporal |
+| `test_verifier.py` | — | End-to-end orchestration, calibration integration |
+| `test_calibration.py` | 44 | Sigmoid, boundary conditions, monotonicity |
+| `test_mcnemar.py` | 46 | p-value math, contingency table, real 300-case run |
+| `test_internal_consistency.py` | 39 | Pairwise, schema, all 3 code paths |

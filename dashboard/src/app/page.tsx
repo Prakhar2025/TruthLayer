@@ -181,9 +181,9 @@ function useCounter(target: number, duration: number = 2000, suffix: string = ""
 /* ═══════════════════════════════════════════════════════════════════════════ */
 
 function Hero() {
-  const stat1 = useCounter(1, 1500, "s");
-  const stat2 = useCounter(100, 2000, "%");
-  const stat3 = useCounter(100, 2200, "%");
+  const stat1 = useCounter(873, 1800, "ms");
+  const stat2 = useCounter(95, 2000, "%");
+  const stat3 = useCounter(286, 2200, "");
 
   return (
     <section
@@ -272,9 +272,9 @@ function Hero() {
           }}
         >
           {[
-            { ref: stat1.ref, display: `<${stat1.display}`, label: "Verification Latency" },
-            { ref: stat2.ref, display: stat2.display, label: "Precision Rate" },
-            { ref: stat3.ref, display: stat3.display, label: "Hallucination Detection" },
+            { ref: stat1.ref, display: stat1.display, label: "Avg Verification Latency" },
+            { ref: stat2.ref, display: stat2.display, label: "Precision (McNemar p<0.001)" },
+            { ref: stat3.ref, display: stat3.display, label: "Tests Passing" },
           ].map((stat) => (
             <div key={stat.label} ref={stat.ref}>
               <div style={{ fontSize: "2.2rem", fontWeight: 800, color: "#6366F1", fontFamily: "monospace" }}>{stat.display}</div>
@@ -314,7 +314,7 @@ function TrustedBy() {
 function HowItWorks() {
   const steps = [
     { icon: Code2, title: "1. Send AI Output", desc: "Pass any AI-generated response and the source documents through our API or SDK.", color: "#6366F1" },
-    { icon: Cpu, title: "2. Dual-Signal Analysis", desc: "Semantic embeddings + entity contradiction detection verify each claim independently.", color: "#818CF8" },
+    { icon: Cpu, title: "2. Five-Signal Analysis", desc: "Semantic embeddings + numerical, negation, superlative, and intra-response consistency signals verify each claim independently.", color: "#818CF8" },
     { icon: Shield, title: "3. Trust Verdict", desc: "Each claim gets a confidence score and classification: Verified, Uncertain, or Unsupported.", color: "#22C55E" },
   ];
 
@@ -575,7 +575,7 @@ function Architecture() {
     { icon: CloudLightning, label: "API Gateway", sub: "Authentication" },
     { icon: Zap, label: "Lambda", sub: "Claim Extraction" },
     { icon: Cpu, label: "Bedrock", sub: "Titan Embeddings" },
-    { icon: Shield, label: "Entity Checker", sub: "Contradiction Detection" },
+    { icon: Shield, label: "5-Signal Engine", sub: "Semantic · Numerical · Negation" },
     { icon: Database, label: "DynamoDB", sub: "Cache + Results" },
   ];
 
@@ -796,8 +796,8 @@ for claim in result.claims:
 
 function Features() {
   const features = [
-    { icon: Zap, title: "Sub-Second Latency", desc: "Live Bedrock verification in ~900ms. Cached responses even faster at ~750ms." },
-    { icon: Shield, title: "100% Precision", desc: "Zero false alarms — two-signal verification with entity contradiction detection." },
+    { icon: Zap, title: "Sub-Second Latency", desc: "Live Bedrock verification in ~873ms warm. DynamoDB embedding cache drops repeated docs to ~200ms." },
+    { icon: Shield, title: "95.3% Precision", desc: "McNemar-proven accuracy (p<0.001) — five-signal engine with Platt-calibrated confidence scores." },
     { icon: BarChart3, title: "Real-time Dashboard", desc: "Monitor hallucination rates, trust scores, and verification trends live." },
     { icon: Code2, title: "One-Line Integration", desc: "pip install truthlayer-sdk → result = tl.verify(response, sources)" },
     { icon: Database, title: "Smart Caching", desc: "DynamoDB embedding cache — 100% hit rate on repeated content, 1.4x speedup." },
@@ -959,7 +959,7 @@ function Footer() {
         </div>
         <p style={{ marginBottom: 8 }}>AI Verification Infrastructure — Making AI Deployment Safe</p>
         <p style={{ fontSize: "0.78rem" }}>
-          Powered by Amazon Bedrock • AWS Lambda • DynamoDB • 87 Tests Passing
+          Powered by Amazon Bedrock • AWS Lambda • DynamoDB • 286 Tests Passing
         </p>
         <div style={{ display: "flex", justifyContent: "center", gap: 24, marginTop: 16, fontSize: "0.8rem" }}>
           <Link href="/dashboard" style={{ color: "var(--color-text-secondary)", textDecoration: "none" }}>Dashboard</Link>

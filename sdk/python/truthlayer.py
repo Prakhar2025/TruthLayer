@@ -17,13 +17,34 @@ from urllib.error import HTTPError
 
 
 @dataclass
+class ContradictionEvidence:
+    """
+    Structured proof of why a claim was flagged by the dual-signal engine.
+
+    Returned as part of each Claim when the entity contradiction detector fires.
+    Use signal and severity to triage, claim_fragment/source_fragment to
+    highlight the conflicting text in a UI, and explanation for a one-line
+    human-readable description.
+    """
+    signal: str            # NUMERICAL_MISMATCH | S2A_NEGATION_POLARITY |
+                           # SEMANTIC_ANTONYM | SUPERLATIVE_SWAP |
+                           # SUPERLATIVE_VS_SPECIFIC
+    severity: str          # CRITICAL | HIGH | MEDIUM | LOW
+    penalty_applied: float # Raw multiplicative penalty (e.g. 0.35)
+    claim_fragment: str = ""  # Contradicting substring from the claim
+    source_fragment: str = ""  # Contradicted substring from the source
+    explanation: str = ""     # Human-readable one-line description
+
+
+@dataclass
 class Claim:
-    """A single verified claim."""
+    """A single verified claim with optional contradiction evidence."""
     text: str
     status: str  # VERIFIED | UNCERTAIN | UNSUPPORTED
     confidence: float
     similarity_score: float
     matched_source: str
+    contradiction_evidence: Optional['ContradictionEvidence'] = None
 
     @property
     def is_verified(self) -> bool:
@@ -36,6 +57,11 @@ class Claim:
     @property
     def is_unsupported(self) -> bool:
         return self.status == "UNSUPPORTED"
+
+    @property
+    def was_flagged(self) -> bool:
+        """True when the entity contradiction detector fired on this claim."""
+        return self.contradiction_evidence is not None
 
 
 @dataclass
@@ -150,6 +176,10 @@ class TruthLayer:
                 confidence=c["confidence"],
                 similarity_score=c["similarity_score"],
                 matched_source=c.get("matched_source", ""),
+                contradiction_evidence=(
+                    ContradictionEvidence(**c["contradiction_evidence"])
+                    if c.get("contradiction_evidence") else None
+                ),
             )
             for c in data.get("claims", [])
         ]

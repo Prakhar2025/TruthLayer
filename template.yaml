@@ -6,7 +6,7 @@ Description: >
 
 Globals:
   Function:
-    Runtime: python3.9
+    Runtime: python3.12
     Timeout: 30
     MemorySize: 512
     Environment:
@@ -44,10 +44,10 @@ Resources:
       Description: Shared TruthLayer source code
       ContentUri: layer/
       CompatibleRuntimes:
-        - python3.9
+        - python3.12
       RetentionPolicy: Delete
     Metadata:
-      BuildMethod: python3.9
+      BuildMethod: python3.12
 
   # ============================
   # Lambda Functions

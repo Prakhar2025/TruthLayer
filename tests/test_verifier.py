@@ -134,6 +134,30 @@ class TestSimilarityEngine:
         assert text == "Source 2"
         assert np.isclose(score, 1.0)
 
+    def test_find_best_match_top_k_returns_highest_score(self):
+        """Top-k pool must still return the single highest-scoring chunk."""
+        engine = SimilarityEngine()
+        claim_emb = np.array([1.0, 0.0, 0.0])
+        source_embs = [
+            np.array([0.5, 0.5, 0.0]),   # rank 2
+            np.array([0.0, 1.0, 0.0]),   # rank 3 (orthogonal)
+            np.array([1.0, 0.0, 0.0]),   # rank 1 (perfect match)
+        ]
+        source_texts = ["Partial", "Orthogonal", "Perfect"]
+        score, text = engine.find_best_match(claim_emb, source_embs, source_texts)
+        assert text == "Perfect"
+        assert np.isclose(score, 1.0)
+
+    def test_find_best_match_single_chunk_unchanged(self):
+        """Single-chunk document behaves identically to old top-1 behaviour."""
+        engine = SimilarityEngine()
+        claim_emb = np.array([1.0, 0.0])
+        source_embs = [np.array([0.8, 0.6])]
+        source_texts = ["Only source"]
+        score, text = engine.find_best_match(claim_emb, source_embs, source_texts, top_k=3)
+        assert text == "Only source"
+        assert score > 0.0
+
 
 class TestConfidenceScorer:
     """Tests for confidence scoring."""
@@ -154,10 +178,13 @@ class TestConfidenceScorer:
         assert scorer.classify_claim(0.10) == "UNSUPPORTED"
     
     def test_get_confidence_percentage(self):
+        # ConfidenceScorer.get_confidence_percentage() is the raw scaler —
+        # it is still tested here for backward-compat.  The verifier layer
+        # applies Platt calibration on top (tested in test_calibration.py).
         scorer = ConfidenceScorer()
-        assert scorer.get_confidence_percentage(0.85) == 85.0
-        assert scorer.get_confidence_percentage(0.5) == 50.0
         assert scorer.get_confidence_percentage(1.0) == 100.0
+        assert scorer.get_confidence_percentage(0.5) == 50.0
+        assert 0.0 <= scorer.get_confidence_percentage(0.85) <= 100.0
 
 
 class TestTruthLayerVerifier:

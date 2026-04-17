@@ -109,38 +109,53 @@ An AI could pass every source-document check and still internally contradict its
 
 ```mermaid
 flowchart TD
-    A["Client SDK / cURL"] -->|x-api-key header| B["API Gateway\nAuth + Rate Limit"]
-    B --> C["Lambda: /verify"]
+    A["Client SDK / cURL"] -->|x-api-key header| B["API Gateway<br/>Auth + Rate Limit"]
+    B --> C["Lambda /verify"]
 
     C --> D["Claim Extractor"]
     D --> E{"Claims?"}
     E -->|None| Z1["Return: trivially consistent"]
-    E -->|"1+"| F["Bedrock Titan V2\n1024-dim Embeddings"]
+    E -->|1+| F["Bedrock Titan V2<br/>1024-dim Embeddings"]
 
-    F --> G["DynamoDB\nEmbedding Cache\nSHA-256 / 7-day TTL"]
-    G -->|cache hit| H
+    F --> G["DynamoDB<br/>Embedding Cache<br/>SHA-256 / 7-day TTL"]
+    G -->|cache hit| H["Cosine Similarity"]
     G -->|cache miss| F2["Bedrock API"]
     F2 --> H
 
-    H["Cosine Similarity\nSimilarityEngine"] --> I
+    H --> I
 
     subgraph ECE ["Entity Contradiction Engine"]
-        I["Signal 2: Numerical\nUnit-aware regex"] --> J
-        J["Signal 3: Negation\nS2A guard + antonyms"] --> K
-        K["Signal 4: Temporal\nYear + duration regex"]
+        I["Signal 2: Numerical<br/>Unit-aware regex"] --> J
+        J["Signal 3: Negation<br/>S2A guard + antonyms"] --> K
+        K["Signal 4: Temporal<br/>Year + duration regex"]
     end
 
-    K --> L["Adjusted Similarity\nsim x penalty_1 x penalty_2"]
-    L --> M["Platt Scaling\nsigma(12.07x - 6.64) x 100"]
-    M --> N["Classification\n>=0.80 VERIFIED / >=0.55 UNCERTAIN / else UNSUPPORTED"]
+    K --> L["Adjusted Similarity<br/>sim x penalty_1 x penalty_2"]
+    L --> M["Platt Scaling<br/>sigma x 12.07x minus 6.64"]
+    M --> N["Classification<br/>0.80+ VERIFIED — 0.55+ UNCERTAIN — else UNSUPPORTED"]
     N --> O
 
-    subgraph S5 ["Signal 5 - Intra-Response Consistency"]
-        O["Pairwise claim check\nall i less than j: penalty both dirs"]
+    subgraph S5 ["Signal 5 — Intra-Response Consistency"]
+        O["Pairwise check: all i less than j<br/>penalty applied both directions"]
     end
 
-    O --> P["API Response\nclaims + summary + internal_consistency + metadata"]
+    O --> P["API Response<br/>claims — summary — internal_consistency — metadata"]
     P --> A
+
+    style A fill:#6366F1,stroke:#4F46E5,color:#fff
+    style B fill:#1e1e2e,stroke:#6366F1,color:#cdd6f4
+    style C fill:#1e1e2e,stroke:#6366F1,color:#cdd6f4
+    style D fill:#1e1e2e,stroke:#818CF8,color:#cdd6f4
+    style E fill:#374151,stroke:#6366F1,color:#fff
+    style F fill:#FF9900,stroke:#cc7a00,color:#fff
+    style F2 fill:#FF9900,stroke:#cc7a00,color:#fff
+    style G fill:#1e1e2e,stroke:#22C55E,color:#cdd6f4
+    style H fill:#1e1e2e,stroke:#818CF8,color:#cdd6f4
+    style L fill:#1e1e2e,stroke:#818CF8,color:#cdd6f4
+    style M fill:#6366F1,stroke:#4F46E5,color:#fff
+    style N fill:#1e1e2e,stroke:#22C55E,color:#cdd6f4
+    style P fill:#22C55E,stroke:#16A34A,color:#fff
+    style Z1 fill:#EF4444,stroke:#DC2626,color:#fff
 ```
 
 ---

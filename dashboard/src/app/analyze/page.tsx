@@ -840,10 +840,10 @@ export default function AnalyzePage() {
                 size={18}
                 style={{ animation: "spin 1s linear infinite" }}
               />
-              Analyzing with Dual-Signal Engine...
+              Analyzing with Five-Signal Engine...
             </>
           ) : (
-            "Analyze with Dual-Signal Verification →"
+            "Analyze with Five-Signal Verification →"
           )}
         </button>
 

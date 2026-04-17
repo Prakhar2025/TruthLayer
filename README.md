@@ -109,37 +109,37 @@ An AI could pass every source-document check and still internally contradict its
 
 ```mermaid
 flowchart TD
-    A[Client SDK / cURL] -->|x-api-key header| B[API Gateway\nAuth + Rate Limit]
-    B --> C[Lambda: /verify]
+    A["Client SDK / cURL"] -->|x-api-key header| B["API Gateway\nAuth + Rate Limit"]
+    B --> C["Lambda: /verify"]
 
-    C --> D[Claim Extractor]
-    D --> E{Claims?}
-    E -->|None| Z1[Return: trivially consistent]
-    E -->|1+| F[Bedrock Titan V2\n1024-dim Embeddings]
+    C --> D["Claim Extractor"]
+    D --> E{"Claims?"}
+    E -->|None| Z1["Return: trivially consistent"]
+    E -->|"1+"| F["Bedrock Titan V2\n1024-dim Embeddings"]
 
-    F --> G[DynamoDB\nEmbedding Cache\nSHA-256 / 7-day TTL]
+    F --> G["DynamoDB\nEmbedding Cache\nSHA-256 / 7-day TTL"]
     G -->|cache hit| H
-    G -->|cache miss → Bedrock| F2[Bedrock API]
+    G -->|cache miss| F2["Bedrock API"]
     F2 --> H
 
-    H[Cosine Similarity\nSimilarityEngine] --> I
+    H["Cosine Similarity\nSimilarityEngine"] --> I
 
-    subgraph "Entity Contradiction Engine — O(n) deterministic"
-        I[Signal 2: Numerical\nUnit-aware regex] --> J
-        J[Signal 3: Negation\nS2A guard + antonyms] --> K
-        K[Signal 4: Temporal\nYear + duration regex]
+    subgraph ECE ["Entity Contradiction Engine"]
+        I["Signal 2: Numerical\nUnit-aware regex"] --> J
+        J["Signal 3: Negation\nS2A guard + antonyms"] --> K
+        K["Signal 4: Temporal\nYear + duration regex"]
     end
 
-    K --> L[Adjusted Similarity\nsim × penalty_1 × penalty_2 × ...]
-    L --> M[Platt Scaling\nσ(12.07·x − 6.64) × 100]
-    M --> N[Classification\n≥0.80 VERIFIED · ≥0.55 UNCERTAIN · else UNSUPPORTED]
+    K --> L["Adjusted Similarity\nsim x penalty_1 x penalty_2"]
+    L --> M["Platt Scaling\nsigma(12.07x - 6.64) x 100"]
+    M --> N["Classification\n>=0.80 VERIFIED / >=0.55 UNCERTAIN / else UNSUPPORTED"]
     N --> O
 
-    subgraph "Signal 5 — Intra-Response Consistency"
-        O[Pairwise claim check\n∀ i < j: penalty both dirs]
+    subgraph S5 ["Signal 5 - Intra-Response Consistency"]
+        O["Pairwise claim check\nall i less than j: penalty both dirs"]
     end
 
-    O --> P[API Response\nclaims · summary · internal_consistency · metadata]
+    O --> P["API Response\nclaims + summary + internal_consistency + metadata"]
     P --> A
 ```
 
@@ -149,7 +149,7 @@ flowchart TD
 
 TruthLayer's superiority over a cosine-only baseline is not a claim — it is a **statistical proof** computed by McNemar's test on the 300-case adversarial benchmark.
 
-| Metric | TruthLayer (Dual-Signal) | Cosine-Only Baseline |
+| Metric | TruthLayer (Five-Signal) | Cosine-Only Baseline |
 |--------|--------------------------|----------------------|
 | **Accuracy** | 90.33% | 86.67% |
 | **Precision** | 95.33% | 82.00% |

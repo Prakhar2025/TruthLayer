@@ -698,7 +698,7 @@ export default function AnalyzePage() {
             }}
           >
             <Zap size={12} />
-            Dual-Signal Engine
+            Five-Signal Engine
           </span>
         </div>
       </nav>
@@ -729,7 +729,7 @@ export default function AnalyzePage() {
               margin: "0 auto",
             }}
           >
-            Paste any AI response and source document — watch the dual-signal engine verify
+            Paste any AI response and source document — watch the five-signal engine verify
             each claim against your source, claim by claim.
           </p>
         </div>

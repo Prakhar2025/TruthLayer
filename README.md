@@ -24,6 +24,18 @@
 
 ---
 
+> [!IMPORTANT]
+> **For Razorpay Evaluators:** I have generated a dedicated API key with a 10,000 request rate limit for you to test the engine's deterministic verification (Signal 2: Numerical Contradiction).
+> 
+> ```bash
+> curl -X POST "https://qoa10ns4c5.execute-api.us-east-1.amazonaws.com/prod/verify" \
+> -H "Content-Type: application/json" \
+> -H "x-api-key: tl_pyM95gUIH3JozipeGG0M9fGXFfz5Mr0nkthVeSnTlUA" \
+> -d '{"source_documents": ["The merchant fee is $299."],"ai_response": "The merchant fee is $399."}'
+> ```
+
+---
+
 ## What TruthLayer Does
 
 TruthLayer is a **production serverless API** that sits between your AI model and your users. Every AI output passes through a five-signal deterministic verification pipeline before it reaches production, catching hallucinations that embedding models fundamentally cannot see.
